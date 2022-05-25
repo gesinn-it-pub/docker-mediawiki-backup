@@ -22,9 +22,9 @@ Then a call with
 > docker-compose backup backup
 ```
 will 
-* delete all files in `./backup`
+* delete a possibly existing `./backup/mediawiki-backup.tar`,
 * create a `./backup/mediawiki-backup.tar` containing
-  * `./mysqldb.bz2`, a mysql db dump,
+  * `./mysqldump.bz2`, a mysql db dump,
   * `./images`, the wiki images folder.
 
 ## Releasing
