@@ -4,6 +4,6 @@ COPY backup /usr/local/bin
 RUN chmod +x /usr/local/bin/* && \
     mkdir /backup
 
-ENV MEDIAWIKI_BACKUP_VERSION=1.0.2
+ENV MEDIAWIKI_BACKUP_VERSION=1.0.3
 
 ENTRYPOINT [ "" ]
