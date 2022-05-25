@@ -4,14 +4,18 @@ VERSION = `sed -n -e 's/^ENV MEDIAWIKI_BACKUP_VERSION=//p' Dockerfile`
 all:
 
 .PHONY: release
-release: login
+release: test login
 	git diff --quiet || (echo 'git directory has changes'; exit 1)
 	git push
 	gh release create $(VERSION)
 
 .PHONY: build
 build:
-	docker build -t ghcr.io/gesinn-it/mediawiki-backup:dev .
+	docker build -t ghcr.io/gesinn-it/mediawiki-backup:test .
+
+.PHONY: test
+test: build
+	$(MAKE) -C tests
 
 .PHONY: login
 login:

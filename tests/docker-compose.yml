@@ -1,0 +1,69 @@
+version: '3'
+
+services:
+
+  # ---- 1 ----
+  # -----------
+  wiki-1:
+    build: .
+    volumes:
+      - wiki-images-1:/var/www/html/images
+    environment:
+      - MYSQL_HOST=mysql-1
+
+  mysql-1:
+    image: mysql:5
+    environment:
+      MYSQL_ROOT_PASSWORD: database
+
+  backup-1:
+    image: ghcr.io/gesinn-it/mediawiki-backup:test
+    volumes:
+      - ./backup:/backup
+      - wiki-images-1:/var/www/html/images
+    environment:
+      MYSQL_HOST: mysql-1
+      MYSQL_ROOT_PASSWORD: database
+    profiles:
+      - no-up
+
+  wait-for-wiki-1:
+    image: mintel/docker-wait-for-it
+    entrypoint: ['/opt/wait-for-it.sh', 'wiki-1:80', '-t', '120']
+    profiles:
+      - no-up
+
+  # ---- 2 ----
+  # -----------
+  wiki-2:
+    build: .
+    volumes:
+      - wiki-images-1:/var/www/html/images
+    environment:
+      - MYSQL_HOST=mysql-2
+
+  mysql-2:
+    image: mysql:5
+    environment:
+      MYSQL_ROOT_PASSWORD: database
+
+  backup-2:
+    image: ghcr.io/gesinn-it/mediawiki-backup:test
+    volumes:
+      - ./backup:/backup
+      - wiki-images-2:/var/www/html/images
+    environment:
+      MYSQL_HOST: mysql-2
+      MYSQL_ROOT_PASSWORD: database
+    profiles:
+      - no-up
+
+  wait-for-wiki-2:
+    image: mintel/docker-wait-for-it
+    entrypoint: ['/opt/wait-for-it.sh', 'wiki-2:80', '-t', '120']
+    profiles:
+      - no-up
+
+volumes:
+  wiki-images-1:
+  wiki-images-2:
