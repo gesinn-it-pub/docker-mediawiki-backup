@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -eu
+
+BACKUP_FILE=/backup/mediawiki-backup.tar
+rm -f $BACKUP_FILE
+
+TMP_FOLDER=`mktemp -d`
+cd $TMP_FOLDER
+
+# set version
+echo $MEDIAWIKI_BACKUP_VERSION > mediawiki-backup.version
+
+# backup db
+echo backing up mysql db
+MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqldump -h $MYSQL_HOST --default-character-set=utf8 --single-transaction --quick wiki -c > mysqldump.sql
+bzip2 -z9 mysqldump.sql
+
+tar -cf $BACKUP_FILE -C $TMP_FOLDER *
+
+# backup images
+echo backing up images
+tar -rf $BACKUP_FILE -C /var/www/html images
+
+echo created $BACKUP_FILE
