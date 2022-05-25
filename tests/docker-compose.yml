@@ -24,6 +24,7 @@ services:
     environment:
       MYSQL_HOST: mysql-1
       MYSQL_ROOT_PASSWORD: database
+      OWNER: "1000"
     profiles:
       - no-up
 

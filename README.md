@@ -15,6 +15,7 @@ services:
     environment:
       MYSQL_HOST: mysql
       MYSQL_ROOT_PASSWORD: database
+      OWNER: ${OWNER:-1000}
 ```
 
 Then a call with

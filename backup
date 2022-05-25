@@ -2,6 +2,8 @@
 
 set -eu
 
+chown -R ${OWNER} /backup
+
 BACKUP_FILE=/backup/mediawiki-backup.tar
 rm -f $BACKUP_FILE
 
