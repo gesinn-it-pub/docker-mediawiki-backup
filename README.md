@@ -26,3 +26,7 @@ will
 * create a `./backup/mediawiki-backup.tar` containing
   * `./mysqldb.bz2`, a mysql db dump,
   * `./images`, the wiki images folder.
+
+## Releasing
+
+Set the version in `ENV MEDIAWIKI_BACKUP_VERSION=...` in `Dockerfile`, commit and run `make release`.

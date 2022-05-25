@@ -19,6 +19,11 @@ jobs:
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v2
         with:
           context: .
