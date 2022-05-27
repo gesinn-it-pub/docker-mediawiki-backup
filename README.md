@@ -1,24 +1,52 @@
-# mediawiki-backup
+ mediawiki-backup
 
 Docker image to backup/restore MediaWiki instances
 
-## backup
+## Using with docker-compose
+
+The most convenient way to use mediawiki-backup is in the context of a docker-compose setup.
 
 ```yml
 # docker-compose.yml
 services: 
-  backup:
-    image: ghcr.io/gesinn-it-pub/mediawiki-backup:latest
+  
+  wiki:
+    # ...
     volumes:
-      - ./backup:/backup
-      - wiki-images:/var/www/html/images
+      # ...
+      - <wiki-images volume or bind mount>:/var/www/html/images # [1]
+      #...
     environment:
-      MYSQL_HOST: mysql
-      MYSQL_ROOT_PASSWORD: database
+      # ...
+      MYSQL_HOST: mysql                                         # [2]
+      # ...
+
+  mysql:
+    # ...
+    environment:
+      # ...
+      MYSQL_ROOT_PASSWORD: database                             # [3]
+      # ...
+  
+  backup:
+    image: ghcr.io/gesinn-it/mediawiki-backup:latest
+    volumes:
+      # folder to hold the backup file
+      - ./backup:/backup
+      - <wiki-images volume or bind mount>:/var/www/html/images # as in [1]
+    environment:
+      MYSQL_HOST: mysql                                         # as in [2]
+      MYSQL_ROOT_PASSWORD: database                             # as in [3]
+      # the desired target owner of the backup folder
       OWNER: ${OWNER:-1000}
+    profiles:
+      - no-up # don't start on 'docker-compose up'
+  # ...
 ```
 
-Then a call with
+### backup
+
+The call
 ```shell
 > docker-compose backup backup
 ```
@@ -26,7 +54,28 @@ will
 * delete a possibly existing `./backup/mediawiki-backup.tar`,
 * create a `./backup/mediawiki-backup.tar` containing
   * `./mysqldump.bz2`, a mysql db dump,
-  * `./images`, the wiki images folder.
+  * `./images`, the wiki images folder
+* set the owner of the `./backup` folder to the `OWNER` passed as environment variable
+
+### restore
+
+The call
+```shell
+> docker-compose backup restore
+```
+will 
+* delete all files within `/var/www/html/images`,
+* restore `/var/www/html/images` and the mysql db according to the contents of `./backup/mediawiki-backup.tar`
+
+To be sure, the restored wiki db contains all changes required by possible local extensions, execute 
+```shell
+> docker-compose exec wiki php mainenance/update.php --quick
+```
+
+As the Elasticsearch server database is not backed up, it has to be updated manually by
+```shell
+> docker-compose exec wiki php extensions/CirrusSearch/maintenance/ForceSearchIndex.php
+```
 
 ## Releasing
 

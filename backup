@@ -2,8 +2,6 @@
 
 set -eu
 
-chown -R ${OWNER} /backup
-
 BACKUP_FILE=/backup/mediawiki-backup.tar
 rm -f $BACKUP_FILE
 
@@ -23,5 +21,8 @@ tar -cf $BACKUP_FILE -C $TMP_FOLDER *
 # backup images
 echo backing up images
 tar -rf $BACKUP_FILE -C /var/www/html images
+
+# set owner if requested
+test "$OWNER" != "" && chown -R $OWNER /backup
 
 echo created $BACKUP_FILE

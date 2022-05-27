@@ -1,5 +1,3 @@
-VERSION = `sed -n -e 's/^ENV MEDIAWIKI_BACKUP_VERSION=//p' Dockerfile`
-
 .PHONY: test
 test:
 	docker-compose pull
