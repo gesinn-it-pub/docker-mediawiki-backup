@@ -2,7 +2,14 @@
 
 set -eu
 
-BACKUP_FILE=/backup/mediawiki-backup.tar
+if [ "${1:-}" = "--semantic-apps" ]; then
+    echo downloading semantic-apps...
+    echo $GH_API_TOKEN | gh auth login --with-token
+    gh release download --repo gesinn-it/semantic-apps-factory --pattern mediawiki-backup.tar --dir /tmp
+    BACKUP_FILE=/tmp/mediawiki-backup.tar
+else
+    BACKUP_FILE=/backup/mediawiki-backup.tar
+fi
 
 TMP_FOLDER=`mktemp -d`
 cd $TMP_FOLDER

@@ -4,7 +4,7 @@ VERSION = `sed -n -e 's/^ENV MEDIAWIKI_BACKUP_VERSION=//p' Dockerfile`
 all:
 
 .PHONY: release
-release: git-push login test
+release: test git-push gh-login
 	gh release create $(VERSION)
 
 .PHONY: build
@@ -20,8 +20,8 @@ git-push:
 	git diff --quiet || (echo 'git directory has changes'; exit 1)
 	git push
 
-.PHONY: login
-login:
+.PHONY: gh-login
+gh-login:
 ifndef GH_API_TOKEN
 	$(error GH_API_TOKEN is not set)
 endif

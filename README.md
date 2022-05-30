@@ -1,4 +1,4 @@
- mediawiki-backup
+# mediawiki-backup
 
 Docker image to backup/restore MediaWiki instances
 
@@ -48,7 +48,7 @@ services:
 
 The call
 ```shell
-> docker-compose backup backup
+> docker-compose run --rm backup backup
 ```
 will 
 * delete a possibly existing `./backup/mediawiki-backup.tar`,
@@ -61,7 +61,7 @@ will
 
 The call
 ```shell
-> docker-compose backup restore
+> docker-compose run --rm backup restore
 ```
 will 
 * delete all files within `/var/www/html/images`,
@@ -69,13 +69,21 @@ will
 
 To be sure, the restored wiki db contains all changes required by possible local extensions, execute 
 ```shell
-> docker-compose exec wiki php mainenance/update.php --quick
+> docker-compose exec wiki php maintenance/update.php --quick
 ```
 
 As the Elasticsearch server database is not backed up, it has to be updated manually by
 ```shell
 > docker-compose exec wiki php extensions/CirrusSearch/maintenance/ForceSearchIndex.php
 ```
+
+#### Command line arguments
+```
+  --semantic-apps
+      download latest semantic-apps from github; be sure to pass an appropriate Github token
+      to the docker-compose run command via -e GH_API_TOKEN=<your token>
+```
+
 
 ## Releasing
 
