@@ -29,7 +29,7 @@ services:
       # ...
   
   backup:
-    image: ghcr.io/gesinn-it/mediawiki-backup:latest
+    image: ghcr.io/gesinn-it-pub/mediawiki-backup:latest
     volumes:
       # folder to hold the backup file
       - ./backup:/backup

@@ -17,7 +17,7 @@ services:
       MYSQL_ROOT_PASSWORD: database
 
   backup-1:
-    image: ghcr.io/gesinn-it/mediawiki-backup:test
+    image: ghcr.io/gesinn-it-pub/mediawiki-backup:test
     volumes:
       - ./backup:/backup
       - wiki-images-1:/var/www/html/images
@@ -49,7 +49,7 @@ services:
       MYSQL_ROOT_PASSWORD: database
 
   backup-2:
-    image: ghcr.io/gesinn-it/mediawiki-backup:test
+    image: ghcr.io/gesinn-it-pub/mediawiki-backup:test
     volumes:
       - ./backup:/backup
       - wiki-images-2:/var/www/html/images

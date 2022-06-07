@@ -2,6 +2,7 @@
 
 set -eu
 
+# for internal use only
 if [ "${1:-}" = "--semantic-apps" ]; then
     echo downloading semantic-apps...
     echo $GH_API_TOKEN | gh auth login --with-token

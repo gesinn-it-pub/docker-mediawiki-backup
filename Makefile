@@ -9,7 +9,7 @@ release: test git-push gh-login
 
 .PHONY: build
 build:
-	docker build -t ghcr.io/gesinn-it/mediawiki-backup:test .
+	docker build -t ghcr.io/gesinn-it-pub/mediawiki-backup:test .
 
 .PHONY: test
 test: build
