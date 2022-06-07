@@ -8,10 +8,11 @@ RUN apt update && \
     apt install gh -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY backup restore /usr/local/bin/
+COPY create restore /usr/local/bin/
 RUN chmod +x /usr/local/bin/* && \
+    ln -s /usr/local/bin/create /usr/local/bin/backup && \
     mkdir /backup
 
-ENV MEDIAWIKI_BACKUP_VERSION=1.2.0
+ENV MEDIAWIKI_BACKUP_VERSION=1.3.0
 
 ENTRYPOINT [ "" ]
