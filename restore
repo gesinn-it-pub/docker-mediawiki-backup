@@ -15,19 +15,19 @@ fi
 TMP_FOLDER=`mktemp -d`
 cd $TMP_FOLDER
 
-tar xf $BACKUP_FILE
-
 # show version
+tar xf $BACKUP_FILE mediawiki-backup.version
 echo backup by mediawiki-backup version `cat mediawiki-backup.version`
 
 # restoring db
 echo restoring mysql db
+tar xf $BACKUP_FILE mysqldump.sql.bz2
 bzip2 -d mysqldump.sql.bz2
 MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql --default-character-set=utf8 wiki < mysqldump.sql
 
 # restoring images
 echo restoring images
 rm -rf /var/www/html/images/* /var/www/html/images/.??*
-tar -xf $BACKUP_FILE -C /var/www/html
+tar -C /var/www/html -xf $BACKUP_FILE images
 
 echo restored $BACKUP_FILE
