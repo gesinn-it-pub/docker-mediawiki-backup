@@ -79,8 +79,8 @@ As the Elasticsearch server database is not backed up, it has to be updated manu
 
 #### Command line arguments
 ```
-  --semantic-apps
-      download latest semantic-apps from github; be sure to pass an appropriate Github token
+  gh-asset <REPOSITORY> <ASSET-NAME> [<VERSION>]
+      download asset ASSET-NAME from GitHub REPOSITORY release VERSION (default: latest); be sure to pass an appropriate Github token
       to the docker-compose run command via -e GH_API_TOKEN=<your token>
 ```
 

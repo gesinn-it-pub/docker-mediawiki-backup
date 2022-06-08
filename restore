@@ -2,12 +2,18 @@
 
 set -eu
 
-# for internal use only
-if [ "${1:-}" = "--semantic-apps" ]; then
-    echo downloading semantic-apps...
+if [ "${1:-}" = "gh-asset" ]; then
+    echo downloading github release asset...
+    REPO=${2:-}
+    PATTERN=${3:-}
+    VERSION=${4:-}
+    if [ "$REPO" = "" -o "$PATTERN" = "" ]; then
+        echo "usage: restore gh-asset <REPOSITORY> <ASSET-NAME> [<VERSION>]"
+        exit 1
+    fi
     echo $GH_API_TOKEN | gh auth login --with-token
-    gh release download --repo gesinn-it/semantic-apps-factory --pattern mediawiki-backup.tar --dir /tmp
-    BACKUP_FILE=/tmp/mediawiki-backup.tar
+    gh release download $VERSION --repo $REPO --pattern $PATTERN --dir /tmp
+    BACKUP_FILE=/tmp/$PATTERN
 else
     BACKUP_FILE=/backup/mediawiki-backup.tar
 fi
