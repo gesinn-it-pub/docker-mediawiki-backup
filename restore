@@ -23,7 +23,7 @@ cd $TMP_FOLDER
 
 # show version
 tar xf $BACKUP_FILE mediawiki-backup.version
-echo backup by mediawiki-backup version `cat mediawiki-backup.version`
+echo backup This backup has been made by mediawiki-backup version `cat mediawiki-backup.version`
 
 # restoring db
 echo restoring mysql db
