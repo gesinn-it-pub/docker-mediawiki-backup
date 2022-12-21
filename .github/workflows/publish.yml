@@ -14,11 +14,6 @@ jobs:
   publish-docker-image:
     runs-on: ubuntu-20.04
     steps:
-      - name: Install dependencies
-        run: |
-          apt update
-          apt install -y bzip2
-
       - uses: actions/checkout@v2
 
       - uses: docker/metadata-action@v3
