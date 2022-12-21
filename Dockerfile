@@ -1,4 +1,4 @@
-FROM mariadb:10.7
+FROM mariadb:10.10
 
 RUN apt update && \
     apt install curl -y && \
@@ -13,6 +13,6 @@ RUN chmod +x /usr/local/bin/* && \
     ln -s /usr/local/bin/create /usr/local/bin/backup && \
     mkdir /backup
 
-ENV MEDIAWIKI_BACKUP_VERSION=2.0.0
+ENV MEDIAWIKI_BACKUP_VERSION=2.1.0
 
 ENTRYPOINT [ "" ]
