@@ -8,7 +8,7 @@ RUN apt update && \
     apt install gh -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY create restore /usr/local/bin/
+COPY create restore repair /usr/local/bin/
 RUN chmod +x /usr/local/bin/* && \
     ln -s /usr/local/bin/create /usr/local/bin/backup && \
     mkdir /backup
