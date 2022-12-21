@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -eu
+
+# repair db
+echo repair mysql db
+MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck --repair --all-databases
+echo done.
