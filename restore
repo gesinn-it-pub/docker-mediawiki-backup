@@ -30,7 +30,7 @@ echo restoring mysql db
 tar xf $BACKUP_FILE mysqldump.sql.bz2
 bzip2 -d mysqldump.sql.bz2
 echo restoring from dump
-MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql --default-character-set=utf8 --innodb-buffer-pool-size=512M wiki < mysqldump.sql
+MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql --default-character-set=utf8 wiki < mysqldump.sql
 echo mysqlcheck
 MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck -h $MYSQL_HOST --repair --database wiki
 

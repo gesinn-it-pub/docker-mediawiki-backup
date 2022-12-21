@@ -13,6 +13,8 @@ RUN chmod +x /usr/local/bin/* && \
     ln -s /usr/local/bin/create /usr/local/bin/backup && \
     mkdir /backup
 
-ENV MEDIAWIKI_BACKUP_VERSION=2.1.2
+COPY my.cnf /etc/mysql/conf.d/
+
+ENV MEDIAWIKI_BACKUP_VERSION=2.1.3
 
 ENTRYPOINT [ "" ]
