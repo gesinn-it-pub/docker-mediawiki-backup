@@ -20,10 +20,9 @@ tar -cf $BACKUP_FILE -C $TMP_FOLDER *
 
 # backup images (optionally set owner)
 echo backing up images
-test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /var/www/html/images
 tar -rf $BACKUP_FILE -C /var/www/html images
 
-# set owner if requested
-#test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /backup
+# set owner if requested (e.g. required by semantic-apps-factory to move the assets)
+test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /backup
 
 echo created $BACKUP_FILE

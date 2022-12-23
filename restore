@@ -39,4 +39,7 @@ echo restoring images
 rm -rf /var/www/html/images/* /var/www/html/images/.??*
 tar -C /var/www/html -xf $BACKUP_FILE images
 
+# setting owner if requested
+test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /var/www/html/images
+
 echo restored $BACKUP_FILE
