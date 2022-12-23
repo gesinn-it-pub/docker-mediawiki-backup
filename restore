@@ -32,7 +32,7 @@ bzip2 -d mysqldump.sql.bz2
 echo restoring from dump
 MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql --default-character-set=utf8 wiki < mysqldump.sql
 echo mysqlcheck
-MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck -h $MYSQL_HOST --repair --database wiki
+MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck -h $MYSQL_HOST --repair --databases wiki
 
 ## restoring images
 echo restoring images
