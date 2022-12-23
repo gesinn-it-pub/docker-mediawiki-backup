@@ -15,6 +15,6 @@ RUN chmod +x /usr/local/bin/* && \
 
 COPY my.cnf /etc/mysql/conf.d/
 
-ENV MEDIAWIKI_BACKUP_VERSION=2.1.3
+ENV MEDIAWIKI_BACKUP_VERSION=2.1.4
 
 ENTRYPOINT [ "" ]

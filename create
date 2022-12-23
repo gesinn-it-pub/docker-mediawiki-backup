@@ -18,11 +18,12 @@ bzip2 -z9 mysqldump.sql
 
 tar -cf $BACKUP_FILE -C $TMP_FOLDER *
 
-# backup images
+# backup images (optionally set owner)
 echo backing up images
+test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /images
 tar -rf $BACKUP_FILE -C /var/www/html images
 
 # set owner if requested
-test "$OWNER" != "" && chown -R $OWNER /backup
+#test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /backup
 
 echo created $BACKUP_FILE
