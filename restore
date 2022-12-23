@@ -21,11 +21,11 @@ fi
 TMP_FOLDER=`mktemp -d`
 cd $TMP_FOLDER
 
-# show version
+## show version
 tar xf $BACKUP_FILE mediawiki-backup.version
 echo backup This backup has been made by mediawiki-backup version `cat mediawiki-backup.version`
 
-# restoring db
+## restoring db
 echo restoring mysql db
 tar xf $BACKUP_FILE mysqldump.sql.bz2
 bzip2 -d mysqldump.sql.bz2
@@ -34,12 +34,12 @@ MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql --default-character-set=utf8 wiki < mysqldu
 echo mysqlcheck
 MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck -h $MYSQL_HOST --repair --database wiki
 
-# restoring images
+## restoring images
 echo restoring images
 rm -rf /var/www/html/images/* /var/www/html/images/.??*
 tar -C /var/www/html -xf $BACKUP_FILE images
 
 # setting owner if requested
-[[ -z ${OWNER} ]] && { echo set owner="$OWNER"; chown -R $OWNER /var/www/html/images; }
+test "${RESTORE_OWNER:-}" != "" && { echo set owner="$RESTORE_OWNER"; chown -R $RESTORE_OWNER /var/www/html/images; }
 
 echo restored $BACKUP_FILE
