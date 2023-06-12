@@ -48,7 +48,7 @@ services:
 
 The call
 ```shell
-> docker-compose run --rm backup backup
+> docker-compose run --rm backup create
 ```
 will 
 * delete a possibly existing `./backup/mediawiki-backup.tar`,
