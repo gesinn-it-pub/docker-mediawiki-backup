@@ -13,7 +13,7 @@ echo $MEDIAWIKI_BACKUP_VERSION > mediawiki-backup.version
 
 # backup logs (optionally set owner)
 echo backing up images
-tar -rf $BACKUP_FILE -C /data log
+tar -rf $BACKUP_FILE -C /data logs
 
 # set owner if requested (e.g. required by semantic-apps-factory to move the assets)
 test "$OWNER" != "" && echo set owner="$OWNER" && chown -R $OWNER /backup
