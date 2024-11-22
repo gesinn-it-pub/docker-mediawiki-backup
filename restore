@@ -15,7 +15,7 @@ if [ "${1:-}" = "gh-asset" ]; then
     gh release download $VERSION --repo $REPO --pattern $PATTERN --dir /tmp
     BACKUP_FILE=/tmp/$PATTERN
 else
-    BACKUP_FILE=/backup/mediawiki-backup.tar
+    ACKUP_FILE=${BACKUP_FILE:-"/backup/mediawiki-backup.tar"}
 fi
 
 TMP_FOLDER=`mktemp -d`
