@@ -1,3 +1,9 @@
+FROM golang:latest AS builder
+COPY ./backup-service /build
+WORKDIR /build
+RUN go build .
+
+
 FROM mariadb:10.10
 
 RUN apt update && \
@@ -9,6 +15,9 @@ RUN apt update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY create create-logs restore repair /usr/local/bin/
+
+COPY --from=builder /build/docker-mediawiki-backup /usr/local/bin/
+
 RUN chmod +x /usr/local/bin/* && \
     ln -s /usr/local/bin/create /usr/local/bin/backup && \
     mkdir /backup
