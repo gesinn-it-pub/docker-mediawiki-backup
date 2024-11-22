@@ -2,7 +2,7 @@
 
 set -eu
 
-BACKUP_FILE=/backup/${BACKUP_FILE:-"mediawiki-backup.tar"}
+BACKUP_FILE=${BACKUP_FILE:-"/backup/mediawiki-backup.tar"}
 
 if [[ -z "$BACKUP_FILE" ]]; then
     echo "Error: BACKUP_FILE is not set."
