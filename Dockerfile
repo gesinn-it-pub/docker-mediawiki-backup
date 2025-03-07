@@ -22,6 +22,6 @@ RUN chmod +x /usr/local/bin/* && \
     ln -s /usr/local/bin/create /usr/local/bin/backup && \
     mkdir /backup
 
-ENV MEDIAWIKI_BACKUP_VERSION=2.1.9
+ENV MEDIAWIKI_BACKUP_VERSION=2.2.1
 
 ENTRYPOINT [ "" ]
