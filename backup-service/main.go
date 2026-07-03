@@ -24,11 +24,30 @@ type Config struct {
 	MinStoragePercentage float64 `json:"minStoragePercentage"`
 }
 
+type StorageTarget struct {
+	RetainCount int `json:"retainCount"`
+}
+
 type BackupSchedule struct {
-	RetainCount int    `json:"retainCount"`
-	Time        string `json:"time"`
-	DayOfWeek   string `json:"dayOfWeek,omitempty"`
-	DayOfMonth  int    `json:"dayOfMonth,omitempty"`
+	// Legacy: retainCount directly on the schedule (filesystem-only, backward compatible)
+	RetainCount int            `json:"retainCount"`
+	Time        string         `json:"time"`
+	DayOfWeek   string         `json:"dayOfWeek,omitempty"`
+	DayOfMonth  int            `json:"dayOfMonth,omitempty"`
+	Filesystem  *StorageTarget `json:"filesystem,omitempty"`
+	Restic      *StorageTarget `json:"restic,omitempty"`
+}
+
+// filesystemRetainCount returns the effective retain count for filesystem backups.
+// Prefers the explicit "filesystem" key; falls back to legacy "retainCount" for backward compatibility.
+func (s BackupSchedule) filesystemRetainCount() (int, bool) {
+	if s.Filesystem != nil {
+		return s.Filesystem.RetainCount, true
+	}
+	if s.RetainCount > 0 {
+		return s.RetainCount, true
+	}
+	return 0, false
 }
 
 var logFile *os.File
@@ -87,32 +106,38 @@ func loadConfig(filename string) (*Config, error) {
 }
 
 func handleBackup(config *Config, backupType string, now time.Time) {
-	backupPath := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
 	schedule := getSchedule(config, backupType)
 
 	if !shouldRunBackup(schedule, backupType, now) {
 		return
 	}
 
-	lastBackup, err := getLastBackupTime(backupPath)
-	if err == nil && time.Since(lastBackup) < time.Minute {
-		log.Printf("%s backup skipped: backup with timestamp %s already exists", backupType, lastBackup)
-		return // Skip if a backup was recently created
+	retainCount, hasFilesystem := schedule.filesystemRetainCount()
+	if hasFilesystem {
+		backupPath := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
+
+		lastBackup, err := getLastBackupTime(backupPath)
+		if err == nil && time.Since(lastBackup) < time.Minute {
+			log.Printf("%s filesystem backup skipped: backup with timestamp %s already exists", backupType, lastBackup)
+		} else if !CheckStorage(config.BackupDirectory, config.MinStoragePercentage) {
+			log.Printf("%s filesystem backup skipped: not enough free storage", backupType)
+		} else {
+			backupFile := filepath.Join(backupPath, fmt.Sprintf("mediawiki-backup-%s-%s.tar", backupType, now.Format("02.01.2006")))
+			if err := runBackupScript(backupFile); err != nil {
+				log.Printf("Error running %s filesystem backup: %v", backupType, err)
+			} else {
+				log.Printf("%s filesystem backup completed: %s", backupType, backupFile)
+				cleanupOldBackups(backupPath, retainCount)
+			}
+		}
 	}
 
-	// check if enough free storage is avaliable
-	if !CheckStorage(config.BackupDirectory, config.MinStoragePercentage) {
-		log.Printf("Backup skipped for %s: Not enough free storage", backupType)
-		return
-	}
-
-	backupFile := filepath.Join(backupPath, fmt.Sprintf("mediawiki-backup-%s-%s.tar", backupType, now.Format("02.01.2006")))
-	err = runBackupScript(backupFile)
-	if err != nil {
-		log.Printf("Error running %s backup: %v", backupType, err)
-	} else {
-		log.Printf("%s backup completed: %s", backupType, backupFile)
-		cleanupOldBackups(backupPath, schedule.RetainCount)
+	if schedule.Restic != nil {
+		if err := runResticBackup(backupType, schedule.Restic.RetainCount); err != nil {
+			log.Printf("Error running %s restic backup: %v", backupType, err)
+		} else {
+			log.Printf("%s restic backup completed", backupType)
+		}
 	}
 }
 
@@ -208,6 +233,49 @@ func runBackupScript(backupFile string) error {
 		return fmt.Errorf("script error: %v", err)
 	}
 	log.Printf("Backup script output: %s", string(output))
+	return nil
+}
+
+func runResticBackup(backupType string, retainCount int) error {
+	// restic backup — env vars (RESTIC_REPOSITORY, RESTIC_PASSWORD, AWS_*) must be set
+	backupCmd := exec.Command("restic", "backup",
+		"--tag", backupType,
+		"/var/www/html/images",
+	)
+	backupCmd.Env = os.Environ()
+	if output, err := backupCmd.CombinedOutput(); err != nil {
+		log.Printf("restic backup output (error): %s", string(output))
+		return fmt.Errorf("restic backup error: %v", err)
+	} else {
+		log.Printf("restic backup output: %s", string(output))
+	}
+
+	// restic backup mysql dump via stdin
+	dumpCmd := exec.Command("bash", "-c",
+		`MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -h "$MYSQL_HOST" --default-character-set=utf8 --single-transaction --quick wiki -c | bzip2 -z9 | restic backup --stdin --stdin-filename wiki.sql.bz2 --tag `+backupType,
+	)
+	dumpCmd.Env = os.Environ()
+	if output, err := dumpCmd.CombinedOutput(); err != nil {
+		log.Printf("restic db backup output (error): %s", string(output))
+		return fmt.Errorf("restic db backup error: %v", err)
+	} else {
+		log.Printf("restic db backup output: %s", string(output))
+	}
+
+	// forget old snapshots according to retainCount for this backupType
+	keepFlag := fmt.Sprintf("--keep-%s", backupType)
+	forgetCmd := exec.Command("restic", "forget", "--prune",
+		"--tag", backupType,
+		keepFlag, fmt.Sprintf("%d", retainCount),
+	)
+	forgetCmd.Env = os.Environ()
+	if output, err := forgetCmd.CombinedOutput(); err != nil {
+		log.Printf("restic forget output (error): %s", string(output))
+		return fmt.Errorf("restic forget error: %v", err)
+	} else {
+		log.Printf("restic forget output: %s", string(output))
+	}
+
 	return nil
 }
 

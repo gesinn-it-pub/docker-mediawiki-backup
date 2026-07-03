@@ -93,23 +93,43 @@ This is an example of a config.json:
 {
   "backups": {
     "daily": {
-      "retainCount": 7,
-      "time": "02:00"
+      "time": "02:00",
+      "filesystem": {
+        "retainCount": 2
+      },
+      "restic": {
+        "retainCount": 7
+      }
     },
     "weekly": {
-      "retainCount": 4,
       "time": "02:00",
-      "dayOfWeek": "Sunday"
+      "dayOfWeek": "Sunday",
+      "filesystem": {
+        "retainCount": 4
+      }
     },
     "monthly": {
-      "retainCount": 12,
       "time": "02:00",
-      "dayOfMonth": 1
+      "dayOfMonth": 1,
+      "restic": {
+        "retainCount": 12
+      }
     }
   },
-  "backupDirectory": "/backup",   // Optional
-  "minStoragePercentage": 10      // Optional
+  "backupDirectory": "/backup",
+  "minStoragePercentage": 10
 }
+```
+
+Omitting `filesystem` or `restic` from a schedule disables that storage target for the plan. The legacy `retainCount` directly on the schedule is still supported as a shorthand for filesystem-only.
+
+For restic backups, configure the repository and credentials via environment variables:
+```yml
+environment:
+  RESTIC_REPOSITORY: s3:https://fsn1.your-objectstorage.com/my-bucket
+  RESTIC_PASSWORD: <your-encryption-password>
+  AWS_ACCESS_KEY_ID: <your-access-key>
+  AWS_SECRET_ACCESS_KEY: <your-secret-key>
 ```
 
 To implement the service in your docker-compose stack, add a new / modify the existing implementation too look like this:
