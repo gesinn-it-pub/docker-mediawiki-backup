@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  test:
+
+    runs-on: ubuntu-22.04
+    continue-on-error: ${{ matrix.experimental }}
+    name: ${{ matrix.name }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported Go release (matches the go directive in go.mod): lint + unit tests only
+          - name: go-1.26 (unit)
+            go_version: '1.26'
+            target: ci-unit
+            experimental: false
+          # Go version used by the Dockerfile: lint, unit tests and integration test
+          - name: go-1.27 (full)
+            go_version: '1.27'
+            target: ci
+            experimental: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ${{ matrix.target }}
+        run: make ${{ matrix.target }} GO_VERSION=${{ matrix.go_version }}

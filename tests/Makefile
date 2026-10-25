@@ -1,24 +1,27 @@
 RESTORE_OWNER = www-data.
+COMPOSE ?= docker compose
 
 .PHONY: test
 test:
 	# setup
-	docker-compose pull
-	docker-compose up -d --build
-	docker-compose run --rm wait-for-wiki-1
-	docker-compose run --rm wait-for-wiki-2
+	$(COMPOSE) pull
+	$(COMPOSE) up -d --build
+	$(COMPOSE) run --rm wait-for-wiki-1
+	$(COMPOSE) run --rm wait-for-wiki-2
 
 	# arrange
-	docker-compose exec -T wiki-1 bash -c "echo some test text | php maintenance/edit.php Test"
-	docker-compose exec -T wiki-1 bash -c "mkdir -p /tmp/image-test; cp resources/assets/mediawiki.png /tmp/image-test; php maintenance/importImages.php /tmp/image-test"
+	$(COMPOSE) exec -T wiki-1 bash -c "echo some test text | php maintenance/edit.php Test"
+	$(COMPOSE) exec -T wiki-1 bash -c "mkdir -p /tmp/image-test; cp resources/assets/mediawiki.png /tmp/image-test; php maintenance/importImages.php /tmp/image-test"
 
 	# act
-	docker-compose run --rm backup-1 create
-	docker-compose run -e RESTORE_OWNER=${RESTORE_OWNER} --rm backup-2 restore
+	$(COMPOSE) run --rm backup-1 create
+	$(COMPOSE) run -e RESTORE_OWNER=${RESTORE_OWNER} --rm backup-2 restore
 
 	# assert
-	docker-compose exec -T wiki-2 bash -c "php maintenance/view.php Test"
-	docker-compose exec -T wiki-2 bash -c "php maintenance/view.php File:Mediawiki.png"
+	$(COMPOSE) exec -T wiki-2 bash -c "php maintenance/view.php Test"
+	$(COMPOSE) exec -T wiki-2 bash -c "php maintenance/view.php File:Mediawiki.png"
 
-	# tear-down
-	# docker-compose down --volumes --remove-orphans
+.PHONY: clean
+clean:
+	$(COMPOSE) down --volumes --remove-orphans
+	rm -rf backup
