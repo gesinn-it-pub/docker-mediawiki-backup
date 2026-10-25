@@ -44,23 +44,28 @@ test-unit:
 	@echo "Go $(GO_VERSION)"
 	$(GO_RUN) go test -race -cover ./...
 
+.PHONY: test-scripts
+test-scripts:
+	$(show-current-target)
+	./tests/test-args.sh
+
 .PHONY: test-integration
 test-integration: build
 	$(show-current-target)
 	$(MAKE) -C tests test; rc=$$?; $(MAKE) -C tests clean; exit $$rc
 
 .PHONY: test
-test: test-unit test-integration
+test: test-unit test-scripts test-integration
 
 # ======== CI ========
 
 # Exactly what CI runs; keep CI workflows calling only make targets.
 # ci-unit is the cheap leg for the Go version matrix, ci adds the integration test.
 .PHONY: ci-unit
-ci-unit: lint test-unit
+ci-unit: lint test-unit test-scripts
 
 .PHONY: ci
-ci: lint test-unit test-integration
+ci: lint test-unit test-scripts test-integration
 
 # ======== Release ========
 

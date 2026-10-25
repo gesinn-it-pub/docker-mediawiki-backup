@@ -2,6 +2,18 @@
 
 set -eu
 
+usage() {
+    echo "usage: repair"
+    echo "  repair the mysql db"
+}
+
+if [ $# -gt 0 ]; then
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        *) echo "Error: unknown argument: $1" >&2; usage >&2; exit 1 ;;
+    esac
+fi
+
 # repair db
 echo repair mysql db
 MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck -h $MYSQL_HOST --repair --all-databases
