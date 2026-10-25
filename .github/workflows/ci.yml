@@ -35,7 +35,7 @@ jobs:
             experimental: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run ${{ matrix.target }}
         run: make ${{ matrix.target }} GO_VERSION=${{ matrix.go_version }}
