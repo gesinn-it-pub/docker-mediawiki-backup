@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker-actions:
+        patterns:
+          - "docker/*"
+
+  # Builder stage (golang) and runtime base image (mariadb)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Go: take new minor releases (1.27 -> 1.28), never a new major
+      - dependency-name: golang
+        update-types: ["version-update:semver-major"]
+      # mariadb is pinned deliberately to match the database images of the wikis
+      - dependency-name: mariadb
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # Test fixtures: MediaWiki image and the Dockerfile/compose files in tests/
+  - package-ecosystem: docker
+    directory: /tests
+    schedule:
+      interval: weekly
+    ignore:
+      # MediaWiki and MySQL versions are pinned deliberately
+      - dependency-name: gesinn/docker-mediawiki-sqlite
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: mysql
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: gomod
+    directory: /backup-service
+    schedule:
+      interval: weekly

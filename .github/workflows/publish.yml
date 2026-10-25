@@ -21,7 +21,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      # - run: make test
+      - run: make ci
 
       - uses: docker/login-action@v3
         with:

@@ -52,6 +52,12 @@ func (s BackupSchedule) filesystemRetainCount() (int, bool) {
 
 var logFile *os.File
 
+// Seams for tests.
+var (
+	execCommand  = exec.Command
+	createScript = "/usr/local/bin/create"
+)
+
 func main() {
 	// Load configuration
 	config, err := loadConfig("/backup.json")
@@ -59,14 +65,7 @@ func main() {
 		log.Fatalf("Error loading config: %v", err)
 	}
 
-	if config.BackupDirectory == "" {
-		log.Println("BackupDirectory is undefined, defaulting to /backup")
-		config.BackupDirectory = "/backup"
-	}
-	if config.MinStoragePercentage == 0.0 {
-		log.Println("MinStoragePercentage is undefined, defaulting to 20%")
-		config.MinStoragePercentage = 20.0
-	}
+	applyDefaults(config)
 
 	// Initialize log file
 	logFilePath := filepath.Join(config.BackupDirectory, "docker-mediawiki-backup.log")
@@ -85,11 +84,25 @@ func main() {
 
 	// Run as a service
 	for {
-		now := time.Now()
-		for _, backupType := range []string{"daily", "weekly", "monthly"} {
-			handleBackup(config, backupType, now)
-		}
+		runDueBackups(config, time.Now())
 		time.Sleep(1 * time.Minute)
+	}
+}
+
+func applyDefaults(config *Config) {
+	if config.BackupDirectory == "" {
+		log.Println("BackupDirectory is undefined, defaulting to /backup")
+		config.BackupDirectory = "/backup"
+	}
+	if config.MinStoragePercentage == 0.0 {
+		log.Println("MinStoragePercentage is undefined, defaulting to 20%")
+		config.MinStoragePercentage = 20.0
+	}
+}
+
+func runDueBackups(config *Config, now time.Time) {
+	for _, backupType := range []string{"daily", "weekly", "monthly"} {
+		handleBackup(config, backupType, now)
 	}
 }
 
@@ -114,10 +127,13 @@ func handleBackup(config *Config, backupType string, now time.Time) {
 
 	retainCount, hasFilesystem := schedule.filesystemRetainCount()
 	if hasFilesystem {
-		backupPath := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
+		backupPath, err := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
+		if err != nil {
+			log.Fatalf("Error creating backup directory %s: %v", backupPath, err)
+		}
 
 		lastBackup, err := getLastBackupTime(backupPath)
-		if err == nil && time.Since(lastBackup) < time.Minute {
+		if err == nil && now.Sub(lastBackup) < time.Minute {
 			log.Printf("%s filesystem backup skipped: backup with timestamp %s already exists", backupType, lastBackup)
 		} else if !CheckStorage(config.BackupDirectory, config.MinStoragePercentage) {
 			log.Printf("%s filesystem backup skipped: not enough free storage", backupType)
@@ -141,14 +157,19 @@ func handleBackup(config *Config, backupType string, now time.Time) {
 	}
 }
 
-func ensureBackupPath(path string) string {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(path, 0755); err != nil {
-			log.Fatalf("Error creating backup directory %s: %v", path, err)
-		}
-		log.Printf("Created backup directory: %s", path)
+func ensureBackupPath(path string) (string, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return path, nil
 	}
-	return path
+	if !os.IsNotExist(err) {
+		return path, err
+	}
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return path, err
+	}
+	log.Printf("Created backup directory: %s", path)
+	return path, nil
 }
 
 func getSchedule(config *Config, backupType string) BackupSchedule {
@@ -224,7 +245,7 @@ func getLastBackupTime(backupPath string) (time.Time, error) {
 }
 
 func runBackupScript(backupFile string) error {
-	cmd := exec.Command("/usr/local/bin/create")
+	cmd := execCommand(createScript)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("BACKUP_FILE=%s", backupFile))
 
 	output, err := cmd.CombinedOutput()
@@ -236,47 +257,39 @@ func runBackupScript(backupFile string) error {
 	return nil
 }
 
+// runLogged runs cmd with the process environment and logs its combined output.
+func runLogged(label string, cmd *exec.Cmd) error {
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("%s output (error): %s", label, string(output))
+		return fmt.Errorf("%s error: %v", label, err)
+	}
+	log.Printf("%s output: %s", label, string(output))
+	return nil
+}
+
 func runResticBackup(backupType string, retainCount int) error {
 	// restic backup — env vars (RESTIC_REPOSITORY, RESTIC_PASSWORD, AWS_*) must be set
-	backupCmd := exec.Command("restic", "backup",
+	if err := runLogged("restic backup", execCommand("restic", "backup",
 		"--tag", backupType,
 		"/var/www/html/images",
-	)
-	backupCmd.Env = os.Environ()
-	if output, err := backupCmd.CombinedOutput(); err != nil {
-		log.Printf("restic backup output (error): %s", string(output))
-		return fmt.Errorf("restic backup error: %v", err)
-	} else {
-		log.Printf("restic backup output: %s", string(output))
+	)); err != nil {
+		return err
 	}
 
 	// restic backup mysql dump via stdin
-	dumpCmd := exec.Command("bash", "-c",
+	if err := runLogged("restic db backup", execCommand("bash", "-c",
 		`MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -h "$MYSQL_HOST" --default-character-set=utf8 --single-transaction --quick wiki -c | bzip2 -z9 | restic backup --stdin --stdin-filename wiki.sql.bz2 --tag `+backupType,
-	)
-	dumpCmd.Env = os.Environ()
-	if output, err := dumpCmd.CombinedOutput(); err != nil {
-		log.Printf("restic db backup output (error): %s", string(output))
-		return fmt.Errorf("restic db backup error: %v", err)
-	} else {
-		log.Printf("restic db backup output: %s", string(output))
+	)); err != nil {
+		return err
 	}
 
 	// forget old snapshots according to retainCount for this backupType
-	keepFlag := fmt.Sprintf("--keep-%s", backupType)
-	forgetCmd := exec.Command("restic", "forget", "--prune",
+	return runLogged("restic forget", execCommand("restic", "forget", "--prune",
 		"--tag", backupType,
-		keepFlag, fmt.Sprintf("%d", retainCount),
-	)
-	forgetCmd.Env = os.Environ()
-	if output, err := forgetCmd.CombinedOutput(); err != nil {
-		log.Printf("restic forget output (error): %s", string(output))
-		return fmt.Errorf("restic forget error: %v", err)
-	} else {
-		log.Printf("restic forget output: %s", string(output))
-	}
-
-	return nil
+		fmt.Sprintf("--keep-%s", backupType), fmt.Sprintf("%d", retainCount),
+	))
 }
 
 func cleanupOldBackups(backupPath string, retainCount int) {
