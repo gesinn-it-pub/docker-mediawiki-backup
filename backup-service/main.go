@@ -22,6 +22,9 @@ type Config struct {
 	} `json:"backups"`
 	BackupDirectory      string  `json:"backupDirectory"`
 	MinStoragePercentage float64 `json:"minStoragePercentage"`
+	// Exclusive: if several tiers are due on the same day, only the highest one
+	// (monthly > weekly > daily) runs.
+	Exclusive bool `json:"exclusive,omitempty"`
 }
 
 type StorageTarget struct {
@@ -30,12 +33,14 @@ type StorageTarget struct {
 
 type BackupSchedule struct {
 	// Legacy: retainCount directly on the schedule (filesystem-only, backward compatible)
-	RetainCount int            `json:"retainCount"`
-	Time        string         `json:"time"`
-	DayOfWeek   string         `json:"dayOfWeek,omitempty"`
-	DayOfMonth  int            `json:"dayOfMonth,omitempty"`
-	Filesystem  *StorageTarget `json:"filesystem,omitempty"`
-	Restic      *StorageTarget `json:"restic,omitempty"`
+	RetainCount int    `json:"retainCount"`
+	Time        string `json:"time"`
+	DayOfWeek   string `json:"dayOfWeek,omitempty"`
+	// DaysOfWeek restricts the daily tier to these weekdays (English names); empty means every day.
+	DaysOfWeek []string       `json:"daysOfWeek,omitempty"`
+	DayOfMonth int            `json:"dayOfMonth,omitempty"`
+	Filesystem *StorageTarget `json:"filesystem,omitempty"`
+	Restic     *StorageTarget `json:"restic,omitempty"`
 }
 
 // filesystemRetainCount returns the effective retain count for filesystem backups.
@@ -100,8 +105,11 @@ func applyDefaults(config *Config) {
 	}
 }
 
+// backupTypes lists the tiers in ascending rank.
+var backupTypes = []string{"daily", "weekly", "monthly"}
+
 func runDueBackups(config *Config, now time.Time) {
-	for _, backupType := range []string{"daily", "weekly", "monthly"} {
+	for _, backupType := range backupTypes {
 		handleBackup(config, backupType, now)
 	}
 }
@@ -115,13 +123,44 @@ func loadConfig(filename string) (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
+	if err := validateConfig(&config); err != nil {
+		return nil, err
+	}
 	return &config, nil
+}
+
+func validateConfig(config *Config) error {
+	for _, backupType := range backupTypes {
+		schedule := getSchedule(config, backupType)
+		if len(schedule.DaysOfWeek) > 0 && backupType != "daily" {
+			return fmt.Errorf("backups.%s: daysOfWeek is only supported for daily (use dayOfWeek for weekly)", backupType)
+		}
+		for _, name := range schedule.DaysOfWeek {
+			if !isWeekdayName(name) {
+				return fmt.Errorf("backups.%s.daysOfWeek: unknown weekday %q (expected English names like \"Monday\")", backupType, name)
+			}
+		}
+	}
+	return nil
+}
+
+func isWeekdayName(name string) bool {
+	for d := time.Sunday; d <= time.Saturday; d++ {
+		if d.String() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func handleBackup(config *Config, backupType string, now time.Time) {
 	schedule := getSchedule(config, backupType)
 
-	if !shouldRunBackup(schedule, backupType, now) {
+	run, reason := decideBackup(config, backupType, now)
+	if !run {
+		if reason != "" {
+			log.Printf("%s skipped: %s", backupType, reason)
+		}
 		return
 	}
 
@@ -184,19 +223,80 @@ func getSchedule(config *Config, backupType string) BackupSchedule {
 	return BackupSchedule{}
 }
 
-func shouldRunBackup(schedule BackupSchedule, backupType string, now time.Time) bool {
-	scheduledTime, _ := time.Parse("15:04", schedule.Time)
+// isDueDay reports whether the tier applies to the day of now, ignoring the time of day.
+func isDueDay(schedule BackupSchedule, backupType string, now time.Time) bool {
 	switch backupType {
 	case "daily":
-		return now.Hour() == scheduledTime.Hour() && now.Minute() == scheduledTime.Minute()
+		if len(schedule.DaysOfWeek) == 0 {
+			return true
+		}
+		for _, name := range schedule.DaysOfWeek {
+			if now.Weekday().String() == name {
+				return true
+			}
+		}
+		return false
 	case "weekly":
-		return now.Weekday().String() == schedule.DayOfWeek &&
-			now.Hour() == scheduledTime.Hour() && now.Minute() == scheduledTime.Minute()
+		return now.Weekday().String() == schedule.DayOfWeek
 	case "monthly":
-		return now.Day() == schedule.DayOfMonth &&
-			now.Hour() == scheduledTime.Hour() && now.Minute() == scheduledTime.Minute()
+		return now.Day() == schedule.DayOfMonth
 	}
 	return false
+}
+
+func isDueTime(schedule BackupSchedule, now time.Time) bool {
+	scheduledTime, _ := time.Parse("15:04", schedule.Time)
+	return now.Hour() == scheduledTime.Hour() && now.Minute() == scheduledTime.Minute()
+}
+
+func shouldRunBackup(schedule BackupSchedule, backupType string, now time.Time) bool {
+	return isDueDay(schedule, backupType, now) && isDueTime(schedule, now)
+}
+
+// supersededBy returns the highest tier above backupType that is due today, or "".
+// It depends only on the date, never on the time of day or call order, so each
+// tier reaches the same decision at its own time slot.
+func supersededBy(config *Config, backupType string, now time.Time) string {
+	for i := len(backupTypes) - 1; i >= 0 && backupTypes[i] != backupType; i-- {
+		higher := getSchedule(config, backupTypes[i])
+		_, hasFilesystem := higher.filesystemRetainCount()
+		if (hasFilesystem || higher.Restic != nil) && isDueDay(higher, backupTypes[i], now) {
+			return backupTypes[i]
+		}
+	}
+	return ""
+}
+
+// decideBackup reports whether backupType has to run at now. If it is scheduled
+// for this minute but suppressed, reason explains why (for the log).
+func decideBackup(config *Config, backupType string, now time.Time) (run bool, reason string) {
+	schedule := getSchedule(config, backupType)
+	if !isDueTime(schedule, now) {
+		return false, ""
+	}
+	if !isDueDay(schedule, backupType, now) {
+		if backupType == "daily" {
+			return false, fmt.Sprintf("%s is not in daysOfWeek", now.Weekday())
+		}
+		return false, ""
+	}
+	if config.Exclusive {
+		if higher := supersededBy(config, backupType, now); higher != "" {
+			return false, fmt.Sprintf("%s is due today", higher)
+		}
+	}
+	return true, ""
+}
+
+// dueBackups lists the tiers that run at now, in execution order.
+func dueBackups(config *Config, now time.Time) []string {
+	var due []string
+	for _, backupType := range backupTypes {
+		if run, _ := decideBackup(config, backupType, now); run {
+			due = append(due, backupType)
+		}
+	}
+	return due
 }
 
 // CheckStorage checks if there is enough free storage available on the mount of the backup directory

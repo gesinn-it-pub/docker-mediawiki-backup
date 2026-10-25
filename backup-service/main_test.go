@@ -589,3 +589,161 @@ func TestRunDueBackups(t *testing.T) {
 		t.Errorf("calls = %q", got)
 	}
 }
+
+// ---- daysOfWeek / exclusive ----
+
+func TestDueBackups(t *testing.T) {
+	// 2024-03: Fri 1st (monthly day), Sat 2nd, Sun 3rd, Mon 4th, Tue 5th, Wed 6th, Sat 9th, Sat 30th
+	at := func(day, h, m int) time.Time { return time.Date(2024, 3, day, h, m, 0, 0, time.UTC) }
+	fs := &StorageTarget{RetainCount: 1}
+
+	// Target scheme: daily Tue-Fri at 01:15, weekly Saturday 02:15, monthly on the 1st at 03:15.
+	scheme := func(exclusive bool) *Config {
+		c := &Config{Exclusive: exclusive}
+		c.Backups.Daily = BackupSchedule{Time: "01:15", DaysOfWeek: []string{"Tuesday", "Wednesday", "Thursday", "Friday"}, Filesystem: fs}
+		c.Backups.Weekly = BackupSchedule{Time: "02:15", DayOfWeek: "Saturday", Filesystem: fs}
+		c.Backups.Monthly = BackupSchedule{Time: "03:15", DayOfMonth: 1, Filesystem: fs}
+		return c
+	}
+	// Every tier at the same time, to exercise the slot logic.
+	legacy := func(exclusive bool) *Config {
+		c := &Config{Exclusive: exclusive}
+		c.Backups.Daily = BackupSchedule{Time: "01:15", Filesystem: fs}
+		c.Backups.Weekly = BackupSchedule{Time: "02:15", DayOfWeek: "Saturday", Filesystem: fs}
+		c.Backups.Monthly = BackupSchedule{Time: "03:15", DayOfMonth: 1, Filesystem: fs}
+		return c
+	}
+
+	tests := []struct {
+		name string
+		cfg  *Config
+		now  time.Time
+		want []string
+	}{
+		{"daysOfWeek hit", scheme(false), at(5, 1, 15), []string{"daily"}},
+		{"daysOfWeek miss (Monday)", scheme(false), at(4, 1, 15), nil},
+		{"daysOfWeek miss (Sunday)", scheme(false), at(3, 1, 15), nil},
+		{"daysOfWeek miss at other time", scheme(false), at(5, 1, 16), nil},
+		{"daysOfWeek unset runs every day", legacy(false), at(3, 1, 15), []string{"daily"}},
+
+		{"weekly on Saturday, exclusive", scheme(true), at(9, 2, 15), []string{"weekly"}},
+		{"weekly on Saturday, not exclusive", scheme(false), at(9, 2, 15), []string{"weekly"}},
+		{"monthly on a Friday, exclusive: daily suppressed", scheme(true), at(1, 1, 15), nil},
+		{"monthly on a Friday, exclusive", scheme(true), at(1, 3, 15), []string{"monthly"}},
+		{"monthly on a Friday, not exclusive: daily runs", scheme(false), at(1, 1, 15), []string{"daily"}},
+
+		{"daily on weekly day, exclusive: suppressed", legacy(true), at(9, 1, 15), nil},
+		{"daily on weekly day, not exclusive", legacy(false), at(9, 1, 15), []string{"daily"}},
+		{"daily on normal day, exclusive", legacy(true), at(5, 1, 15), []string{"daily"}},
+		{"daily on monthly day, exclusive: suppressed", legacy(true), at(1, 1, 15), nil},
+		{"weekly on monthly day, exclusive: suppressed", legacy(true), at(1, 2, 15), nil},
+
+		{"1st is the weekly weekday, exclusive: only monthly", func() *Config {
+			c := legacy(true)
+			c.Backups.Monthly.DayOfMonth = 2 // Saturday 2024-03-02
+			return c
+		}(), at(2, 3, 15), []string{"monthly"}},
+		{"1st is the weekly weekday, exclusive: weekly suppressed", func() *Config {
+			c := legacy(true)
+			c.Backups.Monthly.DayOfMonth = 2
+			return c
+		}(), at(2, 2, 15), nil},
+		{"1st is the weekly weekday, not exclusive: both run", func() *Config {
+			c := legacy(false)
+			c.Backups.Monthly.DayOfMonth = 2
+			c.Backups.Monthly.Time = "02:15"
+			return c
+		}(), at(2, 2, 15), []string{"weekly", "monthly"}},
+
+		{"same slot, exclusive: highest wins", func() *Config {
+			c := legacy(true)
+			c.Backups.Weekly.Time, c.Backups.Monthly.Time = "01:15", "01:15"
+			c.Backups.Monthly.DayOfMonth = 9
+			return c
+		}(), at(9, 1, 15), []string{"monthly"}},
+
+		{"unconfigured higher tier does not suppress", func() *Config {
+			c := legacy(true)
+			c.Backups.Weekly = BackupSchedule{Time: "02:15", DayOfWeek: "Saturday"} // no storage target
+			return c
+		}(), at(9, 1, 15), []string{"daily"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dueBackups(tt.cfg, tt.now)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDueBackupsOrderIndependent(t *testing.T) {
+	// The decision for a tier must not depend on whether higher tiers were already handled.
+	c := &Config{Exclusive: true}
+	fs := &StorageTarget{RetainCount: 1}
+	c.Backups.Daily = BackupSchedule{Time: "01:15", Filesystem: fs}
+	c.Backups.Weekly = BackupSchedule{Time: "02:15", DayOfWeek: "Saturday", Filesystem: fs}
+	now := time.Date(2024, 3, 9, 1, 15, 0, 0, time.UTC)
+	for i := 0; i < 2; i++ {
+		if run, reason := decideBackup(c, "daily", now); run || reason != "weekly is due today" {
+			t.Errorf("run=%v reason=%q", run, reason)
+		}
+	}
+}
+
+func TestDecideBackupSkipReason(t *testing.T) {
+	c := &Config{}
+	c.Backups.Daily = BackupSchedule{Time: "01:15", DaysOfWeek: []string{"Tuesday"}, RetainCount: 1}
+	// Monday 2024-03-04
+	run, reason := decideBackup(c, "daily", time.Date(2024, 3, 4, 1, 15, 0, 0, time.UTC))
+	if run || reason != "Monday is not in daysOfWeek" {
+		t.Errorf("run=%v reason=%q", run, reason)
+	}
+	// Not the scheduled minute: silent.
+	if run, reason := decideBackup(c, "daily", time.Date(2024, 3, 4, 1, 16, 0, 0, time.UTC)); run || reason != "" {
+		t.Errorf("run=%v reason=%q", run, reason)
+	}
+}
+
+func TestLoadConfigDaysOfWeekAndExclusive(t *testing.T) {
+	dir := t.TempDir()
+	load := func(content string) (*Config, error) {
+		p := filepath.Join(dir, "c.json")
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return loadConfig(p)
+	}
+
+	c, err := load(`{"exclusive": true, "backups": {"daily": {"time": "01:15", "daysOfWeek": ["Tuesday", "Friday"]}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Exclusive || len(c.Backups.Daily.DaysOfWeek) != 2 {
+		t.Errorf("unexpected config: %+v", c)
+	}
+
+	// Old configuration without the new fields.
+	c, err = load(`{"backups": {"daily": {"time": "01:15", "retainCount": 3}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Exclusive || c.Backups.Daily.DaysOfWeek != nil {
+		t.Errorf("new fields must default to unset: %+v", c)
+	}
+
+	for name, content := range map[string]string{
+		"unknown name": `{"backups": {"daily": {"daysOfWeek": ["Tuesday", "Funday"]}}}`,
+		"wrong case":   `{"backups": {"daily": {"daysOfWeek": ["tuesday"]}}}`,
+		"on weekly":    `{"backups": {"weekly": {"daysOfWeek": ["Tuesday"]}}}`,
+		"on monthly":   `{"backups": {"monthly": {"daysOfWeek": ["Tuesday"]}}}`,
+	} {
+		if _, err := load(content); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+	if _, err := load(`{"backups": {"daily": {"daysOfWeek": ["Funday"]}}}`); err == nil || !strings.Contains(err.Error(), "Funday") {
+		t.Errorf("error should name the bad weekday, got %v", err)
+	}
+}
