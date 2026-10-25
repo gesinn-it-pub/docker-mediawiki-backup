@@ -123,6 +123,39 @@ This is an example of a config.json:
 
 Omitting `filesystem` or `restic` from a schedule disables that storage target for the plan. The legacy `retainCount` directly on the schedule is still supported as a shorthand for filesystem-only.
 
+#### Weekdays for daily and precedence of the tiers
+
+Two optional settings (both backward compatible; without them everything behaves as before):
+
+- `daysOfWeek` (on `daily` only): list of English weekday names (`"Monday"` … `"Sunday"`). If set, the daily backup runs only on these days. If unset, it runs every day. An unknown name makes the service fail at startup with a clear error.
+- `exclusive` (top level, default `false`): if `true`, only the highest tier due on a given day runs: monthly before weekly before daily. "Due" is decided by weekday / day of month only, not by the time of day, so a weekly at 02:15 also replaces a daily at 01:15. Skipped runs are logged, e.g. `daily skipped: weekly is due today`.
+
+A run at 01:15 backs up the state of the previous day. A matching scheme is therefore daily Tuesday to Friday (backs up Monday to Thursday), weekly on Saturday (backs up Friday) and monthly on the 1st with precedence. Nothing is needed on the weekend, as the content does not change then:
+```json
+{
+  "exclusive": true,
+  "backups": {
+    "daily": {
+      "time": "01:15",
+      "daysOfWeek": ["Tuesday", "Wednesday", "Thursday", "Friday"],
+      "filesystem": { "retainCount": 4 }
+    },
+    "weekly": {
+      "time": "02:15",
+      "dayOfWeek": "Saturday",
+      "filesystem": { "retainCount": 4 }
+    },
+    "monthly": {
+      "time": "03:15",
+      "dayOfMonth": 1,
+      "filesystem": { "retainCount": 12 }
+    }
+  }
+}
+```
+
+**Note:** The JSON parser ignores unknown fields. Image versions older than 2.3.0 therefore silently ignore `daysOfWeek` and `exclusive`: daily would run every day and all due tiers would run. Make sure the image version in use supports them.
+
 For restic backups, configure the repository and credentials via environment variables:
 ```yml
 environment:
