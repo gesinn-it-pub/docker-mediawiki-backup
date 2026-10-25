@@ -7,6 +7,8 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-25
+
 ### Added
 
 - Backup service: `daysOfWeek` (daily only) restricts the daily backup to the listed weekdays.
