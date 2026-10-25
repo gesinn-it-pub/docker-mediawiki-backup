@@ -1,4 +1,4 @@
-FROM golang:latest AS builder
+FROM golang:1.27 AS builder
 COPY ./backup-service /build
 WORKDIR /build
 RUN go build .
