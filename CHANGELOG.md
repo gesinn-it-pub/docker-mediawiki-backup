@@ -7,6 +7,8 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-01
+
 ### Added
 
 - `restore restic [<snapshot>|latest] [--tag <tier>]` restores the database and the images from a restic repository.
