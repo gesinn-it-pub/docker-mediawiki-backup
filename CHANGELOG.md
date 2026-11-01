@@ -7,6 +7,8 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-01
+
 ### Added
 
 - Backup service: the outcome of every attempt (success, retrying, failed, skipped) per tier and storage target is
