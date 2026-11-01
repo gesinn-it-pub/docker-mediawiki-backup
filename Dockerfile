@@ -28,6 +28,6 @@ RUN chmod +x /usr/local/bin/* && \
     mkdir /backup && \
     restic version
 
-ENV MEDIAWIKI_BACKUP_VERSION=2.5.0
+ENV MEDIAWIKI_BACKUP_VERSION=2.6.0
 
 ENTRYPOINT [ "" ]

@@ -7,6 +7,8 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-01
+
 ### Changed
 
 - restic is now taken from the official `restic/restic` image (0.19.1, kept current by Dependabot) instead of the
