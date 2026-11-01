@@ -186,7 +186,16 @@ environment:
   AWS_SECRET_ACCESS_KEY: <your-secret-key>
 ```
 
-The restic repository must exist already (`restic init`); the service does not create it.
+The restic repository must exist already (`restic init`); the service does not create it. The image contains restic
+0.19.1, taken from the official `restic/restic` image and kept current by Dependabot. The entrypoint of the image is
+empty, so restic can be called directly, for example to initialize the repository:
+```shell
+> docker run --rm --env-file restic.env --entrypoint restic <image> init
+```
+A repository created by restic 0.14 or newer (format v2, compressed) cannot be read by older restic versions, so the
+image must not be downgraded below 0.14 for such a repository. `restic init` creates a v2 repository; set
+`RESTIC_COMPRESSION` (`auto` is the default, `max` or `off` are possible) to change the compression. A missing
+repository makes restic exit with code 10.
 
 Each restic run writes two snapshots that are tagged with the tier (`daily`, `weekly`, `monthly`), a common
 `run-<scheduled time>` tag and `version-<image version>`:

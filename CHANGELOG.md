@@ -9,6 +9,11 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ### Changed
 
+- restic is now taken from the official `restic/restic` image (0.19.1, kept current by Dependabot) instead of the
+  distribution package (0.12.1). Only restic 0.14 and newer can compress repositories, which the uncompressed dump
+  relies on, and 0.17 and newer report a missing repository with exit code 10. Repositories created by restic 0.14 or
+  newer (format v2) cannot be read by older versions, so a later image downgrade below 0.14 is not possible for them.
+  Existing format v1 repositories keep working.
 - Backup service: the uncompressed restic dump uses the standard `INSERT` format again instead of one `INSERT` per
   row (`--skip-extended-insert`, introduced in 2.5.0). Measurements showed that it only saves about 11 % of the
   snapshot growth compared to extended inserts, but doubles the dump size and makes the restore several times
