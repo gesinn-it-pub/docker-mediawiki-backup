@@ -290,7 +290,7 @@ func runFilesystemBackup(config *Config, job retryJob) error {
 	retainCount, _ := getSchedule(config, backupType).filesystemRetainCount()
 	backupPath, err := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
 	if err != nil {
-		log.Fatalf("Error creating backup directory %s: %v", backupPath, err)
+		return fmt.Errorf("creating backup directory %s: %w", backupPath, err)
 	}
 
 	if job.attempt == 0 {

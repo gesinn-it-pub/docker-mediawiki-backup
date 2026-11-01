@@ -11,6 +11,10 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 - Backup service: failed filesystem and restic runs are retried (default: 3 additional attempts within 15 minutes). Configurable via the top-level `retry` option (`attempts`, `windowMinutes`); `attempts: 0` disables retries.
 
+### Fixed
+
+- Backup service: a backup directory that cannot be created no longer terminates the whole service. The error is logged and the run is handled like any other failed run (retried if retries are configured), so the other tiers and the restic target keep running.
+
 ### Changed
 
 - Backup service: filesystem backups are written to `*.tar.part` and renamed only after the `create` script

@@ -588,6 +588,21 @@ func TestHandleBackup(t *testing.T) {
 		}
 	})
 
+	t.Run("unwritable backup directory skips the run without exiting", func(t *testing.T) {
+		rec := fakeExec(t, "")
+		// A regular file in place of the backup directory makes MkdirAll fail,
+		// independent of the user the tests run as.
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		writeFile(t, blocker, now)
+		c := &Config{BackupDirectory: blocker}
+		c.Backups.Daily = BackupSchedule{Time: "03:00", RetainCount: 3}
+
+		handleBackup(c, "daily", now) // log.Fatalf would terminate the test binary
+		if got := calls(t, rec); got != nil {
+			t.Errorf("unexpected calls: %q", got)
+		}
+	})
+
 	t.Run("restic failure does not panic", func(t *testing.T) {
 		fakeExec(t, "restic")
 		c := newConfig(t, BackupSchedule{Time: "03:00", Restic: &StorageTarget{RetainCount: 5}})
