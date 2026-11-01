@@ -441,15 +441,17 @@ func TestRunResticBackup(t *testing.T) {
 		}
 		db := got[1]
 		for _, want := range []string{
-			"set -o pipefail", "mysqldump", "--skip-extended-insert", "--order-by-primary", " -c ",
+			"set -o pipefail", "mysqldump", "--order-by-primary", " -c ",
 			"--stdin-filename wiki.sql --tag db", "--tag weekly", "--tag run-20240310T030000Z", "--tag version-9.9.9",
 		} {
 			if !strings.Contains(db, want) {
 				t.Errorf("db call missing %q: %q", want, db)
 			}
 		}
-		if strings.Contains(db, "bzip2") || strings.Contains(db, "--tag complete") {
-			t.Errorf("db call must be uncompressed and not yet complete: %q", db)
+		for _, unwanted := range []string{"bzip2", "--skip-extended-insert", "--tag complete"} {
+			if strings.Contains(db, unwanted) {
+				t.Errorf("db call must be uncompressed, use extended inserts and not yet be complete: %q", db)
+			}
 		}
 		if !strings.Contains(got[2], "--add complete --remove pending-") {
 			t.Errorf("completion call = %q", got[2])

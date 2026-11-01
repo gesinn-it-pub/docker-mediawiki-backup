@@ -7,6 +7,14 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+### Changed
+
+- Backup service: the uncompressed restic dump uses the standard `INSERT` format again instead of one `INSERT` per
+  row (`--skip-extended-insert`, introduced in 2.5.0). Measurements showed that it only saves about 11 % of the
+  snapshot growth compared to extended inserts, but doubles the dump size and makes the restore several times
+  slower. Snapshots made by 2.5.0 stay restorable. The first run after the update is larger than usual, because it
+  hardly deduplicates against the 2.5.0 snapshots.
+
 ## [2.5.0] - 2026-11-01
 
 ### Added

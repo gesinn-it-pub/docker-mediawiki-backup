@@ -565,7 +565,7 @@ func runResticBackup(backupType string, retainCount int, scheduled time.Time) er
 	dumpTags := strings.Join(append([]string{"--tag", "db", "--tag", pending}, tags...), " ")
 	if err := runLogged("restic db backup", execCommand("bash", "-c",
 		`set -o pipefail; MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -h "$MYSQL_HOST" --default-character-set=utf8 `+
-			`--single-transaction --quick --skip-extended-insert --order-by-primary wiki -c `+
+			`--single-transaction --quick --order-by-primary wiki -c `+
 			`| restic backup --stdin --stdin-filename wiki.sql `+dumpTags,
 	)); err != nil {
 		// Best effort: do not leave the partial dump in the repository.

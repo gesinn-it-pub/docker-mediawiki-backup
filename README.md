@@ -192,10 +192,10 @@ Each restic run writes two snapshots that are tagged with the tier (`daily`, `we
 `run-<scheduled time>` tag and `version-<image version>`:
 
 * the images folder (`/var/www/html/images`, tag `images`) and
-* the database as an uncompressed SQL dump (`wiki.sql`, tag `db`; one `INSERT` per row, ordered by primary key),
+* the database as an uncompressed SQL dump (`wiki.sql`, tag `db`; ordered by primary key),
   so that restic can deduplicate both. The dump snapshot gets the tag `complete` only after `mysqldump` has succeeded.
 
-The dump is larger than a compressed one and takes longer to restore. Cache tables are not excluded.
+The dump is larger than a compressed one. Cache tables are not excluded.
 
 To restore from restic, set the same `RESTIC_*` / `AWS_*` variables for the `restore` call:
 ```shell
