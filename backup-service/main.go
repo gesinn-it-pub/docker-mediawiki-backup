@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -80,6 +81,14 @@ var (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "status" {
+		directory := ""
+		if config, err := loadConfig("/backup.json"); err == nil {
+			directory = config.BackupDirectory
+		}
+		os.Exit(runStatusCommand(os.Args[2:], directory, os.Stdout, os.Stderr))
+	}
+
 	// Load configuration
 	config, err := loadConfig("/backup.json")
 	if err != nil {
@@ -103,6 +112,8 @@ func main() {
 
 	log.Println("Backup service started")
 	removeStalePartFiles(config)
+	loadStatus(config)
+	writeStatus(config)
 
 	// Run as a service
 	for {
@@ -188,6 +199,7 @@ func handleBackup(config *Config, backupType string, now time.Time) {
 	if !run {
 		if reason != "" {
 			log.Printf("%s skipped: %s", backupType, reason)
+			recordSkipped(config, backupType, schedule, reason, now)
 		}
 		return
 	}
@@ -232,10 +244,24 @@ func runTarget(config *Config, job retryJob, now time.Time) {
 			log.Printf("%s restic backup completed", job.backupType)
 		}
 	}
+	var skip *skipError
+	if errors.As(err, &skip) {
+		recordStatus(config, job.backupType, job.target, func(ts *TargetStatus) {
+			setOutcome(ts, resultSkipped, skip.reason, job)
+		})
+		return
+	}
 	if err == nil {
 		if job.attempt > 0 {
 			log.Printf("%s %s backup succeeded on retry %d", job.backupType, job.target, job.attempt)
 		}
+		recordStatus(config, job.backupType, job.target, func(ts *TargetStatus) {
+			setOutcome(ts, resultSuccess, "", job)
+			ts.LastSuccess = time.Now()
+			if job.target == targetRestic {
+				ts.LastSuccessRun = resticRunTag(job.scheduled)
+			}
+		})
 		return
 	}
 	log.Printf("Error running %s %s backup (attempt %d): %v", job.backupType, job.target, job.attempt+1, err)
@@ -253,6 +279,9 @@ func runTarget(config *Config, job retryJob, now time.Time) {
 		if attempts > 0 {
 			log.Printf("%s %s backup failed finally after %d attempts", job.backupType, job.target, job.attempt+1)
 		}
+		recordStatus(config, job.backupType, job.target, func(ts *TargetStatus) {
+			setOutcome(ts, resultFailed, err.Error(), job)
+		})
 		return
 	}
 	if job.attempt == 0 {
@@ -264,6 +293,44 @@ func runTarget(config *Config, job retryJob, now time.Time) {
 	log.Printf("%s %s backup: retry %d/%d scheduled for %s",
 		job.backupType, job.target, job.attempt, attempts, job.next.Format("15:04:05"))
 	pendingRetries = append(pendingRetries, job)
+	recordStatus(config, job.backupType, job.target, func(ts *TargetStatus) {
+		setOutcome(ts, resultRetrying, err.Error(), job)
+		ts.NextRetry = job.next
+	})
+}
+
+// setOutcome fills the fields every outcome has in common and keeps the last success. job.attempt is the number
+// of retries started, so the attempts made for job's scheduled run are job.attempt + 1; for a queued retry
+// (job.attempt already incremented) that is the number of attempts made so far.
+func setOutcome(ts *TargetStatus, result, detail string, job retryJob) {
+	ts.Result = result
+	ts.Detail = detail
+	ts.Scheduled = job.scheduled
+	ts.NextRetry = time.Time{}
+	switch result {
+	case resultSkipped:
+		ts.Attempts = 0
+	case resultRetrying:
+		ts.Attempts = job.attempt
+	default:
+		ts.Attempts = job.attempt + 1
+	}
+}
+
+// recordSkipped notes that a due run was skipped by the schedule, for all configured targets of the tier.
+func recordSkipped(config *Config, backupType string, schedule BackupSchedule, reason string, now time.Time) {
+	var targets []string
+	if _, ok := schedule.filesystemRetainCount(); ok {
+		targets = append(targets, targetFilesystem)
+	}
+	if schedule.Restic != nil {
+		targets = append(targets, targetRestic)
+	}
+	for _, target := range targets {
+		recordStatus(config, backupType, target, func(ts *TargetStatus) {
+			setOutcome(ts, resultSkipped, reason, retryJob{scheduled: now})
+		})
+	}
 }
 
 // runPendingRetries runs the retries that are due at now and drops those whose window has passed.
@@ -274,6 +341,10 @@ func runPendingRetries(config *Config, now time.Time) {
 		switch {
 		case now.After(job.deadline):
 			log.Printf("%s %s backup failed finally: retry window exceeded", job.backupType, job.target)
+			recordStatus(config, job.backupType, job.target, func(ts *TargetStatus) {
+				setOutcome(ts, resultFailed, "retry window exceeded", job)
+				ts.Attempts = job.attempt
+			})
 		case now.Before(job.next):
 			pendingRetries = append(pendingRetries, job)
 		default:
@@ -282,6 +353,11 @@ func runPendingRetries(config *Config, now time.Time) {
 		}
 	}
 }
+
+// skipError reports a run that was skipped on purpose; it is neither a failure nor retried.
+type skipError struct{ reason string }
+
+func (e *skipError) Error() string { return e.reason }
 
 // runFilesystemBackup performs one filesystem attempt. Skips (existing backup, low
 // storage) are not failures and are not retried.
@@ -297,12 +373,12 @@ func runFilesystemBackup(config *Config, job retryJob) error {
 		lastBackup, err := getLastBackupTime(backupPath)
 		if err == nil && job.scheduled.Sub(lastBackup) < time.Minute {
 			log.Printf("%s filesystem backup skipped: backup with timestamp %s already exists", backupType, lastBackup)
-			return nil
+			return &skipError{fmt.Sprintf("backup with timestamp %s already exists", lastBackup.Format(time.RFC3339))}
 		}
 	}
 	if !CheckStorage(config.BackupDirectory, config.MinStoragePercentage) {
 		log.Printf("%s filesystem backup skipped: not enough free storage", backupType)
-		return nil
+		return &skipError{"not enough free storage"}
 	}
 	backupFile := filepath.Join(backupPath,
 		fmt.Sprintf("mediawiki-backup-%s-%s.tar", backupType, job.scheduled.Format("02.01.2006")))
@@ -542,6 +618,11 @@ func runLogged(label string, cmd *exec.Cmd) error {
 	return nil
 }
 
+// resticRunTag is the tag shared by the snapshots of one scheduled run.
+func resticRunTag(scheduled time.Time) string {
+	return "run-" + scheduled.UTC().Format("20060102T150405Z")
+}
+
 // runResticBackup writes one run to the restic repository: the images directory and
 // a plain (uncompressed, one INSERT per row, primary-key order) SQL dump from stdin, so
 // that restic can deduplicate both. Both snapshots carry the tier tag and a common
@@ -549,7 +630,7 @@ func runLogged(label string, cmd *exec.Cmd) error {
 // gets the "complete" tag only after mysqldump succeeded; restore ignores snapshots
 // without it. Env vars (RESTIC_REPOSITORY, RESTIC_PASSWORD, AWS_*) must be set.
 func runResticBackup(backupType string, retainCount int, scheduled time.Time) error {
-	tags := []string{"--tag", backupType, "--tag", "run-" + scheduled.UTC().Format("20060102T150405Z")}
+	tags := []string{"--tag", backupType, "--tag", resticRunTag(scheduled)}
 	if v := os.Getenv("MEDIAWIKI_BACKUP_VERSION"); v != "" {
 		tags = append(tags, "--tag", "version-"+v)
 	}

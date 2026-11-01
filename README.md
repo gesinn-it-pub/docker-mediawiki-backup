@@ -166,6 +166,40 @@ A run at 01:15 backs up the state of the previous day. A matching scheme is ther
 
 A failed filesystem or restic run is retried automatically. By default there are up to 3 additional attempts, spread evenly over 15 minutes after the scheduled time (here: after 5, 10 and 15 minutes). Retries do not block the service, so other tiers due in the meantime still run on time. Every attempt and the final outcome are logged. Skipped runs (existing backup, not enough free storage) are not failures and are not retried.
 
+After every attempt the service records the outcome in `status.json` in the backup directory (`/backup/status.json`),
+so you can see whether the backups work without reading the log. Print it with
+```shell
+> docker-compose exec backup-service docker-mediawiki-backup status
+```
+or read the file from the mounted backup folder. Example:
+```json
+{
+  "version": "2.7.0",
+  "started": "2026-11-01T02:00:00Z",
+  "updated": "2026-11-01T03:00:41Z",
+  "backups": {
+    "daily": {
+      "filesystem": {
+        "result": "success", "scheduled": "2026-11-01T03:00:00Z", "lastAttempt": "2026-11-01T03:00:12Z",
+        "attempts": 1, "lastSuccess": "2026-11-01T03:00:12Z"
+      },
+      "restic": {
+        "result": "retrying", "detail": "restic backup error: exit status 1", "scheduled": "2026-11-01T03:00:00Z",
+        "lastAttempt": "2026-11-01T03:00:41Z", "attempts": 1, "nextRetry": "2026-11-01T03:05:00Z",
+        "lastSuccess": "2026-10-31T03:00:44Z", "lastSuccessRun": "run-20261031T030000Z"
+      }
+    }
+  }
+}
+```
+There is one entry per tier and storage target. `result` is one of `success`, `retrying` (the last attempt failed,
+`nextRetry` is the next one), `failed` (no retry left, see `detail`) and `skipped` (not a failure, `detail` gives the
+reason). `lastAttempt` is the time the last attempt finished, `lastSuccess` stays when later attempts fail, and for
+restic `lastSuccessRun` is the run tag of the last success (`restore restic` uses it to pair the snapshots). `updated`
+changes with every attempt, so it is not a heartbeat of the service. The file is replaced atomically and contains no
+repository URL or credentials. Retries are kept in memory only: after a restart of the service a pending retry is
+reported as `failed`.
+
 ```json
 {
   "retry": { "attempts": 3, "windowMinutes": 15 }

@@ -7,6 +7,13 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+### Added
+
+- Backup service: the outcome of every attempt (success, retrying, failed, skipped) per tier and storage target is
+  written to `status.json` in the backup directory and printed by `docker-mediawiki-backup status`. It contains the
+  time of the last attempt and the last success, the number of attempts, the next retry and, for restic, the run of
+  the last success.
+
 ## [2.6.0] - 2026-11-01
 
 ### Changed
