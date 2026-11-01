@@ -7,6 +7,10 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+### Changed
+
+- README: add an introduction describing what the image does and which backup targets it supports.
+
 ## [2.3.0] - 2026-10-25
 
 ### Added

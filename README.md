@@ -2,6 +2,14 @@
 
 Docker image to backup/restore MediaWiki instances
 
+It backs up the two stateful parts of a MediaWiki: the MySQL/MariaDB database (via `mysqldump`) and the `images`
+folder. You can run it on demand (`create`, `restore`) or as a long-running service that creates daily, weekly and
+monthly backups on a configurable schedule. Backups can be written as a `.tar` file to a mounted folder, to a
+[restic](https://restic.net/) repository (deduplicated, encrypted, with remote backends such as S3), or to both.
+Retention is configured per schedule and storage target, so old backups are pruned automatically, and the service
+skips backups when free disk space in the backup folder falls below a configurable threshold. `restore` brings back
+the database and the images from the `.tar` file in a single command.
+
 ## Using with docker-compose
 
 The most convenient way to use mediawiki-backup is in the context of a docker-compose setup.
