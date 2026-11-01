@@ -747,3 +747,120 @@ func TestLoadConfigDaysOfWeekAndExclusive(t *testing.T) {
 		t.Errorf("error should name the bad weekday, got %v", err)
 	}
 }
+
+// ---- retry ----
+
+func TestRetry(t *testing.T) {
+	quietLog(t)
+	// Sunday 2024-03-10 03:00 UTC
+	now := time.Date(2024, 3, 10, 3, 0, 0, 0, time.UTC)
+
+	setup := func(t *testing.T, failOn string, retry *RetryConfig) (*Config, string) {
+		t.Helper()
+		pendingRetries = nil
+		t.Cleanup(func() { pendingRetries = nil })
+		rec := fakeExec(t, failOn)
+		c := &Config{BackupDirectory: t.TempDir(), Retry: retry}
+		c.Backups.Daily = BackupSchedule{Time: "03:00", RetainCount: 3}
+		return c, rec
+	}
+
+	t.Run("success on a later attempt", func(t *testing.T) {
+		c, rec := setup(t, createScript, &RetryConfig{Attempts: 3, WindowMinutes: 15})
+		handleBackup(c, "daily", now)
+		if len(pendingRetries) != 1 || !pendingRetries[0].next.Equal(now.Add(5*time.Minute)) {
+			t.Fatalf("pendingRetries = %+v", pendingRetries)
+		}
+		runPendingRetries(c, now.Add(4*time.Minute)) // not yet due
+		if n := len(calls(t, rec)); n != 1 {
+			t.Fatalf("%d calls before retry is due, want 1", n)
+		}
+		t.Setenv("FAKE_FAIL_ON", "")
+		runPendingRetries(c, now.Add(5*time.Minute))
+		if n := len(calls(t, rec)); n != 2 {
+			t.Errorf("%d calls, want 2", n)
+		}
+		if len(pendingRetries) != 0 {
+			t.Errorf("queue not empty after success: %+v", pendingRetries)
+		}
+	})
+
+	t.Run("all attempts fail", func(t *testing.T) {
+		c, rec := setup(t, createScript, &RetryConfig{Attempts: 3, WindowMinutes: 15})
+		logs := quietLog(t)
+		handleBackup(c, "daily", now)
+		for i := 1; i <= 3; i++ {
+			runPendingRetries(c, now.Add(time.Duration(5*i)*time.Minute))
+		}
+		if n := len(calls(t, rec)); n != 4 {
+			t.Errorf("%d calls, want 4 (1 + 3 retries)", n)
+		}
+		if len(pendingRetries) != 0 {
+			t.Errorf("queue not empty: %+v", pendingRetries)
+		}
+		if !strings.Contains(logs.String(), "failed finally after 4 attempts") {
+			t.Errorf("final outcome not logged: %s", logs)
+		}
+	})
+
+	t.Run("retry window exceeded", func(t *testing.T) {
+		c, rec := setup(t, createScript, &RetryConfig{Attempts: 3, WindowMinutes: 15})
+		logs := quietLog(t)
+		handleBackup(c, "daily", now)
+		runPendingRetries(c, now.Add(20*time.Minute))
+		if n := len(calls(t, rec)); n != 1 {
+			t.Errorf("%d calls, want 1 (no retry after the window)", n)
+		}
+		if len(pendingRetries) != 0 || !strings.Contains(logs.String(), "retry window exceeded") {
+			t.Errorf("queue = %+v, log = %s", pendingRetries, logs)
+		}
+	})
+
+	t.Run("disabled with zero attempts", func(t *testing.T) {
+		c, _ := setup(t, createScript, &RetryConfig{Attempts: 0})
+		handleBackup(c, "daily", now)
+		if len(pendingRetries) != 0 {
+			t.Errorf("unexpected retries: %+v", pendingRetries)
+		}
+	})
+
+	t.Run("restic is retried too", func(t *testing.T) {
+		c, rec := setup(t, "restic backup", &RetryConfig{Attempts: 1, WindowMinutes: 10})
+		c.Backups.Daily = BackupSchedule{Time: "03:00", Restic: &StorageTarget{RetainCount: 3}}
+		handleBackup(c, "daily", now)
+		if len(pendingRetries) != 1 || pendingRetries[0].target != targetRestic {
+			t.Fatalf("pendingRetries = %+v", pendingRetries)
+		}
+		runPendingRetries(c, now.Add(10*time.Minute))
+		if n := len(calls(t, rec)); n != 2 {
+			t.Errorf("%d calls, want 2", n)
+		}
+	})
+
+	t.Run("retry does not block other tiers", func(t *testing.T) {
+		c, rec := setup(t, createScript, &RetryConfig{Attempts: 1, WindowMinutes: 10})
+		c.Backups.Weekly = BackupSchedule{Time: "03:00", DayOfWeek: "Sunday", Restic: &StorageTarget{RetainCount: 1}}
+		runDueBackups(c, now)
+		var sawWeekly bool
+		for _, l := range calls(t, rec) {
+			sawWeekly = sawWeekly || strings.Contains(l, "--tag weekly")
+		}
+		if !sawWeekly {
+			t.Errorf("weekly did not run in the same minute: %q", calls(t, rec))
+		}
+	})
+}
+
+func TestApplyDefaultsRetry(t *testing.T) {
+	quietLog(t)
+	c := &Config{}
+	applyDefaults(c)
+	if c.Retry == nil || c.Retry.Attempts != 3 || c.Retry.WindowMinutes != 15 {
+		t.Errorf("Retry = %+v", c.Retry)
+	}
+	c = &Config{Retry: &RetryConfig{Attempts: 0}}
+	applyDefaults(c)
+	if c.Retry.Attempts != 0 || c.Retry.WindowMinutes != 15 {
+		t.Errorf("explicit opt-out changed: %+v", c.Retry)
+	}
+}

@@ -25,7 +25,22 @@ type Config struct {
 	// Exclusive: if several tiers are due on the same day, only the highest one
 	// (monthly > weekly > daily) runs.
 	Exclusive bool `json:"exclusive,omitempty"`
+	// Retry controls how failed filesystem/restic runs are repeated. Unset: defaults apply.
+	Retry *RetryConfig `json:"retry,omitempty"`
 }
+
+// RetryConfig configures retries of a failed backup run.
+type RetryConfig struct {
+	// Attempts is the number of additional attempts after the first failure; 0 disables retries.
+	Attempts int `json:"attempts"`
+	// WindowMinutes is the time after the scheduled run within which all retries must have run.
+	WindowMinutes int `json:"windowMinutes,omitempty"`
+}
+
+const (
+	defaultRetryAttempts      = 3
+	defaultRetryWindowMinutes = 15
+)
 
 type StorageTarget struct {
 	RetainCount int `json:"retainCount"`
@@ -89,7 +104,9 @@ func main() {
 
 	// Run as a service
 	for {
-		runDueBackups(config, time.Now())
+		now := time.Now()
+		runDueBackups(config, now)
+		runPendingRetries(config, now)
 		time.Sleep(1 * time.Minute)
 	}
 }
@@ -102,6 +119,12 @@ func applyDefaults(config *Config) {
 	if config.MinStoragePercentage == 0.0 {
 		log.Println("MinStoragePercentage is undefined, defaulting to 20%")
 		config.MinStoragePercentage = 20.0
+	}
+	if config.Retry == nil {
+		config.Retry = &RetryConfig{Attempts: defaultRetryAttempts}
+	}
+	if config.Retry.WindowMinutes == 0 {
+		config.Retry.WindowMinutes = defaultRetryWindowMinutes
 	}
 }
 
@@ -141,6 +164,9 @@ func validateConfig(config *Config) error {
 			}
 		}
 	}
+	if r := config.Retry; r != nil && (r.Attempts < 0 || r.WindowMinutes < 0) {
+		return fmt.Errorf("retry: attempts and windowMinutes must not be negative")
+	}
 	return nil
 }
 
@@ -164,36 +190,126 @@ func handleBackup(config *Config, backupType string, now time.Time) {
 		return
 	}
 
-	retainCount, hasFilesystem := schedule.filesystemRetainCount()
-	if hasFilesystem {
-		backupPath, err := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
-		if err != nil {
-			log.Fatalf("Error creating backup directory %s: %v", backupPath, err)
-		}
-
-		lastBackup, err := getLastBackupTime(backupPath)
-		if err == nil && now.Sub(lastBackup) < time.Minute {
-			log.Printf("%s filesystem backup skipped: backup with timestamp %s already exists", backupType, lastBackup)
-		} else if !CheckStorage(config.BackupDirectory, config.MinStoragePercentage) {
-			log.Printf("%s filesystem backup skipped: not enough free storage", backupType)
-		} else {
-			backupFile := filepath.Join(backupPath, fmt.Sprintf("mediawiki-backup-%s-%s.tar", backupType, now.Format("02.01.2006")))
-			if err := runBackupScript(backupFile); err != nil {
-				log.Printf("Error running %s filesystem backup: %v", backupType, err)
-			} else {
-				log.Printf("%s filesystem backup completed: %s", backupType, backupFile)
-				cleanupOldBackups(backupPath, retainCount)
-			}
-		}
+	if _, hasFilesystem := schedule.filesystemRetainCount(); hasFilesystem {
+		runTarget(config, retryJob{backupType: backupType, target: targetFilesystem, scheduled: now}, now)
 	}
-
 	if schedule.Restic != nil {
-		if err := runResticBackup(backupType, schedule.Restic.RetainCount); err != nil {
-			log.Printf("Error running %s restic backup: %v", backupType, err)
-		} else {
-			log.Printf("%s restic backup completed", backupType)
+		runTarget(config, retryJob{backupType: backupType, target: targetRestic, scheduled: now}, now)
+	}
+}
+
+const (
+	targetFilesystem = "filesystem"
+	targetRestic     = "restic"
+)
+
+// retryJob is a failed backup target waiting for its next attempt.
+type retryJob struct {
+	backupType string
+	target     string
+	scheduled  time.Time // the scheduled run; determines the backup file name
+	attempt    int       // retries already started
+	next       time.Time // earliest time of the next attempt
+	deadline   time.Time // no attempt after this
+}
+
+// pendingRetries is only touched from the main loop. Retries are queued instead of
+// slept on, so other tiers due in the meantime still run on time.
+var pendingRetries []retryJob
+
+// runTarget makes one attempt for job.target. On failure it queues the next retry
+// (if configured) or reports that retries are exhausted.
+func runTarget(config *Config, job retryJob, now time.Time) {
+	var err error
+	switch job.target {
+	case targetFilesystem:
+		err = runFilesystemBackup(config, job)
+	case targetRestic:
+		restic := getSchedule(config, job.backupType).Restic
+		if err = runResticBackup(job.backupType, restic.RetainCount); err == nil {
+			log.Printf("%s restic backup completed", job.backupType)
 		}
 	}
+	if err == nil {
+		if job.attempt > 0 {
+			log.Printf("%s %s backup succeeded on retry %d", job.backupType, job.target, job.attempt)
+		}
+		return
+	}
+	log.Printf("Error running %s %s backup (attempt %d): %v", job.backupType, job.target, job.attempt+1, err)
+
+	attempts, window := 0, time.Duration(0)
+	if r := config.Retry; r != nil && r.Attempts > 0 {
+		attempts = r.Attempts
+		minutes := r.WindowMinutes
+		if minutes == 0 {
+			minutes = defaultRetryWindowMinutes
+		}
+		window = time.Duration(minutes) * time.Minute
+	}
+	if job.attempt >= attempts {
+		if attempts > 0 {
+			log.Printf("%s %s backup failed finally after %d attempts", job.backupType, job.target, job.attempt+1)
+		}
+		return
+	}
+	if job.attempt == 0 {
+		job.deadline = job.scheduled.Add(window)
+	}
+	// Spread the retries evenly over the window; the last one is due at the deadline.
+	job.attempt++
+	job.next = job.scheduled.Add(window * time.Duration(job.attempt) / time.Duration(attempts))
+	log.Printf("%s %s backup: retry %d/%d scheduled for %s",
+		job.backupType, job.target, job.attempt, attempts, job.next.Format("15:04:05"))
+	pendingRetries = append(pendingRetries, job)
+}
+
+// runPendingRetries runs the retries that are due at now and drops those whose window has passed.
+func runPendingRetries(config *Config, now time.Time) {
+	queue := pendingRetries
+	pendingRetries = nil
+	for _, job := range queue {
+		switch {
+		case now.After(job.deadline):
+			log.Printf("%s %s backup failed finally: retry window exceeded", job.backupType, job.target)
+		case now.Before(job.next):
+			pendingRetries = append(pendingRetries, job)
+		default:
+			log.Printf("%s %s backup: starting retry %d", job.backupType, job.target, job.attempt)
+			runTarget(config, job, now)
+		}
+	}
+}
+
+// runFilesystemBackup performs one filesystem attempt. Skips (existing backup, low
+// storage) are not failures and are not retried.
+func runFilesystemBackup(config *Config, job retryJob) error {
+	backupType := job.backupType
+	retainCount, _ := getSchedule(config, backupType).filesystemRetainCount()
+	backupPath, err := ensureBackupPath(filepath.Join(config.BackupDirectory, backupType))
+	if err != nil {
+		log.Fatalf("Error creating backup directory %s: %v", backupPath, err)
+	}
+
+	if job.attempt == 0 {
+		lastBackup, err := getLastBackupTime(backupPath)
+		if err == nil && job.scheduled.Sub(lastBackup) < time.Minute {
+			log.Printf("%s filesystem backup skipped: backup with timestamp %s already exists", backupType, lastBackup)
+			return nil
+		}
+	}
+	if !CheckStorage(config.BackupDirectory, config.MinStoragePercentage) {
+		log.Printf("%s filesystem backup skipped: not enough free storage", backupType)
+		return nil
+	}
+	backupFile := filepath.Join(backupPath,
+		fmt.Sprintf("mediawiki-backup-%s-%s.tar", backupType, job.scheduled.Format("02.01.2006")))
+	if err := runBackupScript(backupFile); err != nil {
+		return err
+	}
+	log.Printf("%s filesystem backup completed: %s", backupType, backupFile)
+	cleanupOldBackups(backupPath, retainCount)
+	return nil
 }
 
 func ensureBackupPath(path string) (string, error) {

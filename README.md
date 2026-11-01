@@ -162,6 +162,19 @@ A run at 01:15 backs up the state of the previous day. A matching scheme is ther
 }
 ```
 
+#### Retry of failed runs
+
+A failed filesystem or restic run is retried automatically. By default there are up to 3 additional attempts, spread evenly over 15 minutes after the scheduled time (here: after 5, 10 and 15 minutes). Retries do not block the service, so other tiers due in the meantime still run on time. Every attempt and the final outcome are logged. Skipped runs (existing backup, not enough free storage) are not failures and are not retried.
+
+```json
+{
+  "retry": { "attempts": 3, "windowMinutes": 15 }
+}
+```
+
+- `attempts` (default `3`): number of additional attempts; `0` disables retries.
+- `windowMinutes` (default `15`): time after the scheduled run within which all retries must have run. Retries missed after the window are dropped.
+
 **Note:** The JSON parser ignores unknown fields. Image versions older than 2.3.0 therefore silently ignore `daysOfWeek` and `exclusive`: daily would run every day and all due tiers would run. Make sure the image version in use supports them.
 
 For restic backups, configure the repository and credentials via environment variables:

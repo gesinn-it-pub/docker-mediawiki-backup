@@ -7,6 +7,10 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+### Added
+
+- Backup service: failed filesystem and restic runs are retried (default: 3 additional attempts within 15 minutes). Configurable via the top-level `retry` option (`attempts`, `windowMinutes`); `attempts: 0` disables retries.
+
 ### Changed
 
 - README: add an introduction describing what the image does and which backup targets it supports.
