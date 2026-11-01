@@ -1,16 +1,81 @@
 #!/bin/bash
 
 set -eu
+set -o pipefail
 
 usage() {
     echo "usage: restore [gh-asset <REPOSITORY> <ASSET-NAME> [<VERSION>]]"
+    echo "       restore restic [<SNAPSHOT>|latest] [--tag <TIER>]"
 }
 
 case "${1:-}" in
-    ""|gh-asset) ;;
+    ""|gh-asset|restic) ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Error: unknown argument: $1" >&2; usage >&2; exit 1 ;;
 esac
+
+if [ "${1:-}" = "restic" ]; then
+    shift
+    SNAPSHOT=latest
+    TIER=
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --tag)
+                TIER=${2:-}
+                [ -n "$TIER" ] || { echo "Error: --tag requires a value" >&2; usage >&2; exit 1; }
+                shift 2 ;;
+            -*) echo "Error: unknown argument: $1" >&2; usage >&2; exit 1 ;;
+            *) SNAPSHOT=$1; shift ;;
+        esac
+    done
+
+    # A backup run consists of a db snapshot and an images snapshot sharing a run-<time> tag.
+    # Only db snapshots tagged "complete" are considered, so a dump that was cut off is never used.
+    if [ "$SNAPSHOT" = "latest" ]; then
+        DB_TAGS=db,complete${TIER:+,$TIER}
+        SNAPSHOT_INFO=$(restic snapshots --json --latest 1 --tag "$DB_TAGS")
+    else
+        SNAPSHOT_INFO=$(restic snapshots --json "$SNAPSHOT")
+    fi
+    RUN_TAG=$(grep -o '"run-[0-9TZ]*"' <<<"$SNAPSHOT_INFO" | tail -1 | tr -d '"' || true)
+    if [ -z "$RUN_TAG" ]; then
+        echo "Error: no complete backup run found in the restic repository" \
+            "(snapshot: $SNAPSHOT${TIER:+, tag: $TIER}); snapshots from before the run tags cannot be restored" >&2
+        exit 1
+    fi
+    if [ "$SNAPSHOT" != "latest" ] && ! grep -q '"complete"' <<<"$SNAPSHOT_INFO"; then
+        echo "Error: snapshot $SNAPSHOT is not a complete db snapshot" >&2
+        exit 1
+    fi
+    VERSION_TAG=$(grep -o '"version-[^"]*"' <<<"$SNAPSHOT_INFO" | tail -1 | tr -d '"' || true)
+    echo restoring restic run $RUN_TAG
+    test -n "$VERSION_TAG" && echo "This backup has been made by mediawiki-backup version ${VERSION_TAG#version-}"
+
+    ## restoring db
+    echo restoring mysql db
+    restic dump latest /wiki.sql --tag "db,complete,$RUN_TAG" \
+        | MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql --default-character-set=utf8 wiki
+    echo mysqlcheck
+    MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysqlcheck -h $MYSQL_HOST --repair --databases wiki
+
+    ## restoring images
+    # Restored into a temporary folder first so that restic does not touch the metadata of the parent folders.
+    echo restoring images
+    IMAGES_TMP=`mktemp -d`
+    restic restore latest --tag "images,$RUN_TAG" --target "$IMAGES_TMP" --include /var/www/html/images
+    rm -rf /var/www/html/images/* /var/www/html/images/.??*
+    cp -a "$IMAGES_TMP/var/www/html/images/." /var/www/html/images/
+    rm -rf "$IMAGES_TMP"
+
+    # setting owner if requested
+    if [ "${RESTORE_OWNER:-}" != "" ]; then
+        echo set owner="$RESTORE_OWNER"
+        chown -R $RESTORE_OWNER /var/www/html/images
+    fi
+
+    echo restored restic run $RUN_TAG
+    exit 0
+fi
 
 if [ "${1:-}" = "gh-asset" ]; then
     echo downloading github release asset...

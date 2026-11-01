@@ -228,7 +228,7 @@ func runTarget(config *Config, job retryJob, now time.Time) {
 		err = runFilesystemBackup(config, job)
 	case targetRestic:
 		restic := getSchedule(config, job.backupType).Restic
-		if err = runResticBackup(job.backupType, restic.RetainCount); err == nil {
+		if err = runResticBackup(job.backupType, restic.RetainCount, job.scheduled); err == nil {
 			log.Printf("%s restic backup completed", job.backupType)
 		}
 	}
@@ -542,18 +542,38 @@ func runLogged(label string, cmd *exec.Cmd) error {
 	return nil
 }
 
-func runResticBackup(backupType string, retainCount int) error {
-	// restic backup — env vars (RESTIC_REPOSITORY, RESTIC_PASSWORD, AWS_*) must be set
-	if err := runLogged("restic backup", execCommand("restic", "backup",
-		"--tag", backupType,
-		"/var/www/html/images",
-	)); err != nil {
+// runResticBackup writes one run to the restic repository: the images directory and
+// a plain (uncompressed, one INSERT per row, primary-key order) SQL dump from stdin, so
+// that restic can deduplicate both. Both snapshots carry the tier tag and a common
+// run-<scheduled> tag, so `restore restic` can restore them as a pair. The dump snapshot
+// gets the "complete" tag only after mysqldump succeeded; restore ignores snapshots
+// without it. Env vars (RESTIC_REPOSITORY, RESTIC_PASSWORD, AWS_*) must be set.
+func runResticBackup(backupType string, retainCount int, scheduled time.Time) error {
+	tags := []string{"--tag", backupType, "--tag", "run-" + scheduled.UTC().Format("20060102T150405Z")}
+	if v := os.Getenv("MEDIAWIKI_BACKUP_VERSION"); v != "" {
+		tags = append(tags, "--tag", "version-"+v)
+	}
+
+	imageArgs := append([]string{"backup", "--tag", "images"}, tags...)
+	if err := runLogged("restic backup", execCommand("restic", append(imageArgs, "/var/www/html/images")...)); err != nil {
 		return err
 	}
 
-	// restic backup mysql dump via stdin
+	// The pending tag is unique per attempt, so a retry never completes the partial
+	// snapshot of an earlier failed attempt.
+	pending := fmt.Sprintf("pending-%d", time.Now().UnixNano())
+	dumpTags := strings.Join(append([]string{"--tag", "db", "--tag", pending}, tags...), " ")
 	if err := runLogged("restic db backup", execCommand("bash", "-c",
-		`MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -h "$MYSQL_HOST" --default-character-set=utf8 --single-transaction --quick wiki -c | bzip2 -z9 | restic backup --stdin --stdin-filename wiki.sql.bz2 --tag `+backupType,
+		`set -o pipefail; MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -h "$MYSQL_HOST" --default-character-set=utf8 `+
+			`--single-transaction --quick --skip-extended-insert --order-by-primary wiki -c `+
+			`| restic backup --stdin --stdin-filename wiki.sql `+dumpTags,
+	)); err != nil {
+		// Best effort: do not leave the partial dump in the repository.
+		_ = runLogged("restic discard partial db backup", execCommand("restic", "forget", "--tag", pending))
+		return err
+	}
+	if err := runLogged("restic mark db backup complete", execCommand("restic", "tag",
+		"--tag", pending, "--add", "complete", "--remove", pending,
 	)); err != nil {
 		return err
 	}

@@ -23,5 +23,7 @@ for script in create create-logs repair restore; do
     check "$script unknown arg"   1 bash "./$script" bogus
 done
 check "restore gh-asset without repository" 1 env GH_API_TOKEN=x bash ./restore gh-asset
+check "restore restic unknown option" 1 bash ./restore restic --bogus
+check "restore restic --tag without value" 1 bash ./restore restic --tag
 
 exit $fail

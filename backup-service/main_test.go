@@ -416,19 +416,22 @@ func TestRunBackupScript(t *testing.T) {
 
 func TestRunResticBackup(t *testing.T) {
 	quietLog(t)
+	scheduled := time.Date(2024, 3, 10, 3, 0, 0, 0, time.UTC)
+	t.Setenv("MEDIAWIKI_BACKUP_VERSION", "9.9.9")
 
-	t.Run("runs backup, db dump and forget in order", func(t *testing.T) {
+	t.Run("runs backup, db dump, completion and forget in order", func(t *testing.T) {
 		rec := fakeExec(t, "")
-		if err := runResticBackup("weekly", 4); err != nil {
+		if err := runResticBackup("weekly", 4, scheduled); err != nil {
 			t.Fatal(err)
 		}
 		got := calls(t, rec)
-		if len(got) != 3 {
-			t.Fatalf("got %d calls, want 3: %q", len(got), got)
+		if len(got) != 4 {
+			t.Fatalf("got %d calls, want 4: %q", len(got), got)
 		}
 		wantPrefix := []string{
-			"restic backup --tag weekly /var/www/html/images",
+			"restic backup --tag images --tag weekly --tag run-20240310T030000Z --tag version-9.9.9 /var/www/html/images",
 			"bash -c ",
+			"restic tag --tag pending-",
 			"restic forget --prune --tag weekly --keep-weekly 4",
 		}
 		for i, p := range wantPrefix {
@@ -436,8 +439,42 @@ func TestRunResticBackup(t *testing.T) {
 				t.Errorf("call %d = %q, want prefix %q", i, got[i], p)
 			}
 		}
-		if !strings.Contains(got[1], "--tag weekly") || !strings.Contains(got[1], "mysqldump") {
-			t.Errorf("db call missing tag/mysqldump: %q", got[1])
+		db := got[1]
+		for _, want := range []string{
+			"set -o pipefail", "mysqldump", "--skip-extended-insert", "--order-by-primary", " -c ",
+			"--stdin-filename wiki.sql --tag db", "--tag weekly", "--tag run-20240310T030000Z", "--tag version-9.9.9",
+		} {
+			if !strings.Contains(db, want) {
+				t.Errorf("db call missing %q: %q", want, db)
+			}
+		}
+		if strings.Contains(db, "bzip2") || strings.Contains(db, "--tag complete") {
+			t.Errorf("db call must be uncompressed and not yet complete: %q", db)
+		}
+		if !strings.Contains(got[2], "--add complete --remove pending-") {
+			t.Errorf("completion call = %q", got[2])
+		}
+	})
+
+	t.Run("version tag is omitted when unknown", func(t *testing.T) {
+		t.Setenv("MEDIAWIKI_BACKUP_VERSION", "")
+		rec := fakeExec(t, "")
+		if err := runResticBackup("daily", 7, scheduled); err != nil {
+			t.Fatal(err)
+		}
+		if got := calls(t, rec); strings.Contains(strings.Join(got, "\n"), "version-") {
+			t.Errorf("unexpected version tag: %q", got)
+		}
+	})
+
+	t.Run("failed dump is discarded and not completed", func(t *testing.T) {
+		rec := fakeExec(t, "mysqldump")
+		if err := runResticBackup("daily", 7, scheduled); err == nil {
+			t.Fatal("expected error")
+		}
+		got := calls(t, rec)
+		if len(got) != 3 || !strings.HasPrefix(got[2], "restic forget --tag pending-") {
+			t.Fatalf("calls = %q, want backup, dump, discard of the pending snapshot", got)
 		}
 	})
 
@@ -446,14 +483,14 @@ func TestRunResticBackup(t *testing.T) {
 		failOn string
 		calls  int // calls made before aborting, including the failing one
 	}{
-		{"backup fails", "restic backup --tag", 1},
-		{"db dump fails", "mysqldump", 2},
-		{"forget fails", "restic forget", 3},
+		{"backup fails", "restic backup --tag images", 1},
+		{"marking complete fails", "restic tag", 3},
+		{"forget fails", "restic forget --prune", 4},
 	}
 	for _, f := range failures {
 		t.Run(f.name, func(t *testing.T) {
 			rec := fakeExec(t, f.failOn)
-			if err := runResticBackup("daily", 7); err == nil {
+			if err := runResticBackup("daily", 7, scheduled); err == nil {
 				t.Fatal("expected error")
 			}
 			if n := len(calls(t, rec)); n != f.calls {
@@ -565,7 +602,7 @@ func TestHandleBackup(t *testing.T) {
 		handleBackup(c, "daily", now)
 
 		got := calls(t, rec)
-		if len(got) != 3 || !strings.HasPrefix(got[0], "restic backup") {
+		if len(got) != 4 || !strings.HasPrefix(got[0], "restic backup") {
 			t.Errorf("calls = %q", got)
 		}
 		if _, err := os.Stat(filepath.Join(c.BackupDirectory, "daily")); !os.IsNotExist(err) {
@@ -583,7 +620,7 @@ func TestHandleBackup(t *testing.T) {
 		handleBackup(c, "daily", now)
 
 		got := calls(t, rec)
-		if len(got) != 4 || !strings.HasPrefix(got[0], createScript) || !strings.HasPrefix(got[1], "restic backup") {
+		if len(got) != 5 || !strings.HasPrefix(got[0], createScript) || !strings.HasPrefix(got[1], "restic backup") {
 			t.Errorf("calls = %q", got)
 		}
 	})

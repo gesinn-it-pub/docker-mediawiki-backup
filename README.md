@@ -186,6 +186,27 @@ environment:
   AWS_SECRET_ACCESS_KEY: <your-secret-key>
 ```
 
+The restic repository must exist already (`restic init`); the service does not create it.
+
+Each restic run writes two snapshots that are tagged with the tier (`daily`, `weekly`, `monthly`), a common
+`run-<scheduled time>` tag and `version-<image version>`:
+
+* the images folder (`/var/www/html/images`, tag `images`) and
+* the database as an uncompressed SQL dump (`wiki.sql`, tag `db`; one `INSERT` per row, ordered by primary key),
+  so that restic can deduplicate both. The dump snapshot gets the tag `complete` only after `mysqldump` has succeeded.
+
+The dump is larger than a compressed one and takes longer to restore. Cache tables are not excluded.
+
+To restore from restic, set the same `RESTIC_*` / `AWS_*` variables for the `restore` call:
+```shell
+> docker-compose run --rm backup restore restic                 # newest complete run of any tier
+> docker-compose run --rm backup restore restic --tag weekly    # newest complete weekly run
+> docker-compose run --rm backup restore restic <SNAPSHOT-ID>   # run of the given db snapshot
+```
+It restores the database and the images of the chosen run as a pair (like the tar based `restore`, it replaces
+`/var/www/html/images` and the db contents; `RESTORE_OWNER` is honored). Only runs made by image version 2.4.0 or newer
+can be restored this way.
+
 To implement the service in your docker-compose stack, add a new / modify the existing implementation too look like this:
 ```yml
 # docker-compose.yml

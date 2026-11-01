@@ -7,6 +7,20 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ## [Unreleased]
 
+### Added
+
+- `restore restic [<snapshot>|latest] [--tag <tier>]` restores the database and the images from a restic repository.
+  It uses the newest complete run (or the run of the given db snapshot) so that both belong together.
+
+### Changed
+
+- Backup service: the restic target stores the database dump uncompressed as `wiki.sql` (`--skip-extended-insert
+  --order-by-primary`) instead of `wiki.sql.bz2`, so that restic can deduplicate it. The first run after the update
+  is therefore large. Snapshots of the old format stay in the repository; they are not restorable with
+  `restore restic` and have to be removed with `restic forget`.
+- Backup service: restic snapshots are tagged `images`/`db`, `run-<scheduled time>` and `version-<image version>`.
+  A dump snapshot is tagged `complete` only after `mysqldump` succeeded; a failed dump is discarded.
+
 ## [2.4.0] - 2026-11-01
 
 ### Added
