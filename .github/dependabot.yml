@@ -24,15 +24,13 @@ updates:
       - dependency-name: mariadb
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
-  # Test fixtures: MediaWiki image and the Dockerfile/compose files in tests/
+  # Test fixtures: the Dockerfile/compose files in tests/
   - package-ecosystem: docker
     directory: /tests
     schedule:
       interval: weekly
     ignore:
-      # MediaWiki and MySQL versions are pinned deliberately
-      - dependency-name: gesinn/docker-mediawiki-sqlite
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # The MySQL version is pinned deliberately (the MediaWiki release is a build argument, see tests/Dockerfile)
       - dependency-name: mysql
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 

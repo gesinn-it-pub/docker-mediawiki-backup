@@ -1,6 +1,10 @@
 RESTORE_OWNER = www-data.
 COMPOSE ?= docker compose
 
+# MediaWiki release of the test wikis (see Dockerfile), e.g. "make test MW_VERSION=1.39"
+MW_VERSION ?= 1.43
+export MW_VERSION
+
 .PHONY: test
 test:
 	# setup

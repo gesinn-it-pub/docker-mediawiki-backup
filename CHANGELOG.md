@@ -20,6 +20,8 @@ Versions before 2.3.0 are documented in the GitHub releases only.
   `restore restic` and have to be removed with `restic forget`.
 - Backup service: restic snapshots are tagged `images`/`db`, `run-<scheduled time>` and `version-<image version>`.
   A dump snapshot is tagged `complete` only after `mysqldump` succeeded; a failed dump is discarded.
+- Integration test: runs against MediaWiki 1.39 and 1.43 with `mysql:8` instead of MediaWiki 1.35 with `mysql:5`;
+  CI covers both releases (`make test MW_VERSION=1.39`).
 
 ## [2.4.0] - 2026-11-01
 

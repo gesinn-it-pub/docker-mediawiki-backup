@@ -26,11 +26,19 @@ jobs:
           # Oldest supported Go release (matches the go directive in go.mod): lint + unit tests only
           - name: go-1.26 (unit)
             go_version: '1.26'
+            mw_version: '1.43'
             target: ci-unit
             experimental: false
-          # Go version used by the Dockerfile: lint, unit tests and integration test
-          - name: go-1.27 (full)
+          # Go version used by the Dockerfile: lint, unit tests and integration test.
+          # The integration test runs against each supported MediaWiki release (with mysql:8).
+          - name: go-1.27 / mw-1.43 (full)
             go_version: '1.27'
+            mw_version: '1.43'
+            target: ci
+            experimental: false
+          - name: go-1.27 / mw-1.39 (full)
+            go_version: '1.27'
+            mw_version: '1.39'
             target: ci
             experimental: false
 
@@ -38,4 +46,4 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Run ${{ matrix.target }}
-        run: make ${{ matrix.target }} GO_VERSION=${{ matrix.go_version }}
+        run: make ${{ matrix.target }} GO_VERSION=${{ matrix.go_version }} MW_VERSION=${{ matrix.mw_version }}

@@ -1,11 +1,10 @@
-FROM gesinn/docker-mediawiki-sqlite:1.35
+# MW_VERSION selects the MediaWiki release (1.39, 1.43); the image already contains docker-mediawiki-tools.
+ARG MW_VERSION=1.43
+FROM gesinn/mediawiki-ci:${MW_VERSION}
 
-# add /build-tools and /tools
+# Install MediaWiki on first start (against the database given by MYSQL_HOST), then run Apache.
 RUN rm -rf LocalSettings.php /var/www/data && \
-    curl -LJ https://github.com/gesinn-it-pub/docker-mediawiki-tools/tarball/1.3.1 -o /tools.tgz && \
-    tar -xzf /tools.tgz -C / --strip-components 1 && rm /tools.tgz && \
-    echo '#!/bin/bash\ninitialize-wiki.sh\napache2-foreground\n' > /tools/startup-container.sh && \
-    chmod +x /build-tools/* /tools/*
-ENV PATH="/tools:/build-tools:${PATH}"
+    printf '#!/bin/bash\ninitialize-wiki.sh\napache2-foreground\n' > /tools/startup-container.sh && \
+    chmod +x /tools/startup-container.sh
 
 CMD [ "startup-container.sh" ]
