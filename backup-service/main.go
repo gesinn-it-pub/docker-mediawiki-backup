@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -101,6 +102,7 @@ func main() {
 	log.SetOutput(multiWriter)
 
 	log.Println("Backup service started")
+	removeStalePartFiles(config)
 
 	// Run as a service
 	for {
@@ -440,8 +442,53 @@ func CheckStorage(backupDirectory string, minPercentage float64) bool {
 	return true
 }
 
-func getLastBackupTime(backupPath string) (time.Time, error) {
+// partSuffix marks an archive that is still being written. Such files are never
+// treated as backups: a run only renames its file to the final name on success.
+const partSuffix = ".part"
+
+func isPartFile(name string) bool {
+	return strings.HasSuffix(name, partSuffix)
+}
+
+// backupEntries lists the completed backups in backupPath, ignoring *.part files.
+func backupEntries(backupPath string) ([]os.DirEntry, error) {
 	files, err := os.ReadDir(backupPath)
+	if err != nil {
+		return nil, err
+	}
+	complete := files[:0]
+	for _, file := range files {
+		if !isPartFile(file.Name()) {
+			complete = append(complete, file)
+		}
+	}
+	return complete, nil
+}
+
+// removeStalePartFiles deletes partial archives left behind by an interrupted run
+// (e.g. the container was stopped mid-backup). Called once at startup.
+func removeStalePartFiles(config *Config) {
+	for _, backupType := range backupTypes {
+		dir := filepath.Join(config.BackupDirectory, backupType)
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			if !isPartFile(file.Name()) {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, file.Name())); err != nil {
+				log.Printf("Error deleting stale partial backup %s: %v", file.Name(), err)
+			} else {
+				log.Printf("Deleted stale partial backup: %s", file.Name())
+			}
+		}
+	}
+}
+
+func getLastBackupTime(backupPath string) (time.Time, error) {
+	files, err := backupEntries(backupPath)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -460,16 +507,26 @@ func getLastBackupTime(backupPath string) (time.Time, error) {
 	return lastModTime, nil
 }
 
+// runBackupScript lets the create script write to backupFile+".part" and renames
+// it to backupFile only if the script succeeded. A failed run leaves no file behind.
 func runBackupScript(backupFile string) error {
+	partFile := backupFile + partSuffix
+	os.Remove(partFile)
+
 	cmd := execCommand(createScript)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("BACKUP_FILE=%s", backupFile))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("BACKUP_FILE=%s", partFile))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Backup script output (error): %s", string(output))
+		os.Remove(partFile)
 		return fmt.Errorf("script error: %v", err)
 	}
 	log.Printf("Backup script output: %s", string(output))
+	if err := os.Rename(partFile, backupFile); err != nil {
+		os.Remove(partFile)
+		return fmt.Errorf("finalizing %s: %v", backupFile, err)
+	}
 	return nil
 }
 
@@ -509,7 +566,7 @@ func runResticBackup(backupType string, retainCount int) error {
 }
 
 func cleanupOldBackups(backupPath string, retainCount int) {
-	files, err := os.ReadDir(backupPath)
+	files, err := backupEntries(backupPath)
 	if err != nil {
 		log.Printf("Error reading backup directory: %v", err)
 		return

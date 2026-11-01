@@ -13,6 +13,10 @@ Versions before 2.3.0 are documented in the GitHub releases only.
 
 ### Changed
 
+- Backup service: filesystem backups are written to `*.tar.part` and renamed only after the `create` script
+  succeeded. A failed run no longer leaves a partial archive that counts as the latest backup or pushes out a good
+  one during cleanup. `*.part` files are ignored when determining the last backup and when cleaning up, and stale
+  ones are removed at startup.
 - README: add an introduction describing what the image does and which backup targets it supports.
 
 ## [2.3.0] - 2026-10-25

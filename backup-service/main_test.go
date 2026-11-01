@@ -94,6 +94,10 @@ func TestHelperProcess(t *testing.T) {
 	}
 	f.WriteString(line + " | BACKUP_FILE=" + os.Getenv("BACKUP_FILE") + "\n")
 	f.Close()
+	// Like the real create script, leave an archive at BACKUP_FILE (partial if it fails).
+	if bf := os.Getenv("BACKUP_FILE"); bf != "" {
+		os.WriteFile(bf, []byte("archive"), 0644)
+	}
 	if failOn := os.Getenv("FAKE_FAIL_ON"); failOn != "" && strings.Contains(line, failOn) {
 		os.Stderr.WriteString("simulated failure\n")
 		os.Exit(1)
@@ -370,20 +374,42 @@ func TestRunBackupScript(t *testing.T) {
 
 	t.Run("passes BACKUP_FILE", func(t *testing.T) {
 		rec := fakeExec(t, "")
-		if err := runBackupScript("/backup/daily/x.tar"); err != nil {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "x.tar")
+		if err := runBackupScript(target); err != nil {
 			t.Fatal(err)
 		}
 		got := calls(t, rec)
-		want := createScript + " | BACKUP_FILE=/backup/daily/x.tar"
+		want := createScript + " | BACKUP_FILE=" + target + ".part"
 		if len(got) != 1 || got[0] != want {
 			t.Errorf("calls = %q, want [%q]", got, want)
 		}
+		if n := names(t, dir); len(n) != 1 || n[0] != "x.tar" {
+			t.Errorf("files = %q, want only x.tar (renamed from .part)", n)
+		}
 	})
 
-	t.Run("propagates failure", func(t *testing.T) {
+	t.Run("propagates failure and leaves no file behind", func(t *testing.T) {
 		fakeExec(t, createScript)
-		if err := runBackupScript("/x.tar"); err == nil {
+		dir := t.TempDir()
+		if err := runBackupScript(filepath.Join(dir, "x.tar")); err == nil {
 			t.Error("expected error")
+		}
+		if n := names(t, dir); len(n) != 0 {
+			t.Errorf("files = %q, want none", n)
+		}
+	})
+
+	t.Run("failure keeps an existing backup of the same name", func(t *testing.T) {
+		fakeExec(t, createScript)
+		dir := t.TempDir()
+		target := filepath.Join(dir, "x.tar")
+		writeFile(t, target, time.Now())
+		if err := runBackupScript(target); err == nil {
+			t.Error("expected error")
+		}
+		if n := names(t, dir); len(n) != 1 || n[0] != "x.tar" {
+			t.Errorf("files = %q, want only x.tar", n)
 		}
 	})
 }
@@ -469,7 +495,7 @@ func TestHandleBackup(t *testing.T) {
 
 		wantFile := filepath.Join(c.BackupDirectory, "daily", "mediawiki-backup-daily-10.03.2024.tar")
 		got := calls(t, rec)
-		if len(got) != 1 || got[0] != createScript+" | BACKUP_FILE="+wantFile {
+		if len(got) != 1 || got[0] != createScript+" | BACKUP_FILE="+wantFile+".part" {
 			t.Errorf("calls = %q", got)
 		}
 	})
@@ -486,7 +512,7 @@ func TestHandleBackup(t *testing.T) {
 
 		handleBackup(c, "daily", now)
 		if n := len(names(t, dir)); n != 2 {
-			t.Errorf("%d files left, want 2 (no cleanup after failed backup)", n)
+			t.Errorf("%d files left, want 2 (no cleanup after failed backup, no partial file)", n)
 		}
 	})
 
@@ -501,9 +527,10 @@ func TestHandleBackup(t *testing.T) {
 		writeFile(t, filepath.Join(dir, "old2"), now.Add(-48*time.Hour))
 
 		handleBackup(c, "daily", now)
-		// The fake script creates no file, so retain=1 leaves only the newest old one.
-		if got := strings.Join(names(t, dir), ","); got != "old2" {
-			t.Errorf("remaining %q, want old2", got)
+		// The fake script creates the archive, so retain=1 leaves only the new one.
+		want := "mediawiki-backup-daily-10.03.2024.tar"
+		if got := strings.Join(names(t, dir), ","); got != want {
+			t.Errorf("remaining %q, want %s", got, want)
 		}
 	})
 
@@ -862,5 +889,44 @@ func TestApplyDefaultsRetry(t *testing.T) {
 	applyDefaults(c)
 	if c.Retry.Attempts != 0 || c.Retry.WindowMinutes != 15 {
 		t.Errorf("explicit opt-out changed: %+v", c.Retry)
+	}
+}
+
+// ---- partial archives ----
+
+func TestPartFilesAreNotBackups(t *testing.T) {
+	quietLog(t)
+	dir := t.TempDir()
+	old := time.Date(2024, 3, 1, 3, 0, 0, 0, time.UTC)
+	writeFile(t, filepath.Join(dir, "a.tar"), old)
+	writeFile(t, filepath.Join(dir, "b.tar.part"), old.Add(48*time.Hour))
+
+	got, err := getLastBackupTime(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Equal(old) {
+		t.Errorf("getLastBackupTime = %v, want %v (ignoring .part)", got, old)
+	}
+
+	cleanupOldBackups(dir, 1)
+	if n := names(t, dir); len(n) != 2 {
+		t.Errorf("files = %q, want a.tar kept and .part untouched", n)
+	}
+}
+
+func TestRemoveStalePartFiles(t *testing.T) {
+	quietLog(t)
+	c := &Config{BackupDirectory: t.TempDir()}
+	daily := filepath.Join(c.BackupDirectory, "daily")
+	if err := os.MkdirAll(daily, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(daily, "a.tar"), time.Now())
+	writeFile(t, filepath.Join(daily, "b.tar.part"), time.Now())
+
+	removeStalePartFiles(c)
+	if n := names(t, daily); len(n) != 1 || n[0] != "a.tar" {
+		t.Errorf("files = %q, want only a.tar", n)
 	}
 }
